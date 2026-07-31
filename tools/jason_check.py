@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""
+jason_check — portable index-size check (the no-hard-hook degradation, layer 2).
+
+On Claude Code the PreToolUse hook (hooks/jason_index_guard.py) enforces the
+cap deterministically for the tools it matches (Edit | Write | MultiEdit) — NOT for
+a shell tool, an MCP file tool, or an external editor. On any other host that lacks
+such a hook, and on this host for the writes it cannot see, the agent should run
+THIS after writing the index, and compact if it says OVER:
+
+    python tools/jason_check.py <path-to-MEMORY.md>
+
+Exit code: 0 = OK (within caps), 1 = WARN (> soft), 2 = OVER (> hard). Error codes
+(distinct from the 0/1/2 result contract, so an automated caller can tell "could
+not check" from "index is fine"): 64 = usage error (no path given), 66 = the index
+path could not be read. Prints a one-line verdict + advice. Caps via the same env
+vars as the hook (JASON_HARD / JASON_WARN / JASON_HARD_BYTES /
+JASON_WARN_BYTES).
+"""
+import os
+import sys
+
+
+def _envint(name, default):
+    # Bad/empty or non-positive (0 / negative) cap -> fall back to the default,
+    # matching the hook so the two layers agree.
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        val = int(raw.strip())
+    except (TypeError, ValueError):
+        return default
+    return val if val > 0 else default
+
+
+def _lines(text):
+    if not text:
+        return 0
+    return text.count("\n") + (0 if text.endswith("\n") else 1)
+
+
+def _kb(n):
+    # MB/GB tiers so a runaway index reads as "300.0 MB", not "307200.0 KB".
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 ** 2:
+        return f"{n / 1024:.1f} KB"
+    if n < 1024 ** 3:
+        return f"{n / 1024 ** 2:.1f} MB"
+    return f"{n / 1024 ** 3:.1f} GB"
+
+
+def _over(lines, nbytes, lcap, bcap):
+    # Name the dimension(s) that crossed a cap, so the reader knows whether to cut
+    # lines or bytes (the WARN/OVER text alone didn't say which tripped).
+    parts = []
+    if lines > lcap:
+        parts.append(f"{lines} lines > {lcap}")
+    if nbytes > bcap:
+        parts.append(f"{_kb(nbytes)} > {_kb(bcap)}")
+    return " and ".join(parts)
+
+
+def _first_step(bytes_over):
+    # Which compaction step pays off first given the breached dimension.
+    if bytes_over:
+        return "pointer-ify the longest index lines first (cuts bytes, and lines if you merge)"
+    return "merge/archive notes or collapse pointers to cut the line count"
+
+
+def main(argv):
+    # Keep stdout from crashing on a strict OEM/ascii console (Windows cp437/cp850 or a
+    # POSIX C/ascii locale): the verdict text uses an em-dash that those codepages can't
+    # encode and would otherwise raise UnicodeEncodeError instead of printing the verdict.
+    try:
+        sys.stdout.reconfigure(errors="backslashreplace")
+    except (AttributeError, ValueError, OSError):
+        pass
+    if any(a in ("-h", "--help") for a in argv[1:]):
+        print((__doc__ or "").strip())
+        return 0
+    if len(argv) < 2:
+        print("usage: jason_check.py <path-to-index (MEMORY.md)>")
+        return 64  # EX_USAGE — a misuse must not read as OK (exit 0) to a caller
+    path = argv[1]
+    hard = _envint("JASON_HARD", 200)
+    warn = _envint("JASON_WARN", 150)
+    hard_b = _envint("JASON_HARD_BYTES", 25600)
+    warn_b = _envint("JASON_WARN_BYTES", 20480)
+    # Size first, WITHOUT reading: a planted or runaway index (a sync client can
+    # drop a multi-gigabyte file here) would otherwise be slurped into memory and
+    # the checker would hang or die with MemoryError instead of answering OVER —
+    # the one thing it exists to say. Past the byte cap the verdict is already
+    # decided, so the content is never needed.
+    try:
+        nbytes = os.path.getsize(path)
+    except OSError as e:
+        print(f"jason: cannot read {path}: {e}")
+        return 66  # EX_NOINPUT — "could not check" must be distinct from OK
+    if nbytes > hard_b:
+        print(f"OVER: index is {_kb(nbytes)} — over {_kb(nbytes)} > {_kb(hard_b)} "
+              f"(cap {hard} lines / {_kb(hard_b)}), past the load window. Compact now: "
+              f"{_first_step(True)} — before adding more, or the tail stops being recalled.")
+        return 2
+    # Under the byte cap, so the file is small (<= 25 KB by default) and reading
+    # it to count lines is bounded by that cap.
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError as e:
+        print(f"jason: cannot read {path}: {e}")
+        return 66
+    text = raw.decode("utf-8", "replace")
+    lines, nbytes = _lines(text), len(raw)
+    size = f"{lines} lines / {_kb(nbytes)}"
+    # _kb, not integer //1024: a custom cap like JASON_HARD_BYTES=1000 rendered
+    # as a contradictory "cap ... / 0 KB" while the comparison itself was right.
+    caps = f"{hard} lines / {_kb(hard_b)}"
+    if lines > hard or nbytes > hard_b:
+        print(f"OVER: index is {size} — over {_over(lines, nbytes, hard, hard_b)} "
+              f"(cap {caps}), past the load window. Compact now: {_first_step(nbytes > hard_b)} "
+              f"— before adding more, or the tail stops being recalled.")
+        return 2
+    if lines > warn or nbytes > warn_b:
+        print(f"WARN: index is {size} — over {_over(lines, nbytes, warn, warn_b)} (cap {caps}). "
+              f"Getting long; plan a compaction pass soon ({_first_step(nbytes > warn_b)}).")
+        return 1
+    print(f"OK: index is {size} (cap {caps}).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
