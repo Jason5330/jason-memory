@@ -3,7 +3,7 @@
 一套**零基礎設施的 AI Agent 記憶協議**——不是資料庫、不是框架、不需要伺服器。
 記憶就是一個資料夾裡放很多小的、人類可讀的 Markdown 筆記檔，加上一份「每次都會被載入」的索引檔 `MEMORY.md`。
 
-Jason-memory 改寫自開源專案 [tinqiao-oss/engramory](https://github.com/tinqiao-oss/engramory)（MIT 授權，版權見 [LICENSE](LICENSE)），核心差異是把 `feedback`（經驗回饋）這個類型的用途收得更窄、更明確：
+核心差異是把 `feedback`（經驗回饋）這個類型的用途收得更窄、更明確：
 
 > **`feedback` 只記兩件事：踩過的坑、驗證有效的做法。** 而且 Agent 要**自己判斷**該不該記，不是只有使用者開口糾正才記。
 
@@ -21,7 +21,7 @@ Jason-memory 改寫自開源專案 [tinqiao-oss/engramory](https://github.com/ti
 - [設定選項](#設定選項)
 - [安全與隱私](#安全與隱私)
 - [已知限制](#已知限制)
-- [授權與致謝](#授權與致謝)
+- [授權](#授權)
 
 ---
 
@@ -98,6 +98,12 @@ metadata:
 以 **Claude Code** 為例：
 
 1. **下載/clone 這個 repo** 到你想要的位置（例如專案內的 `jason-memory/`，或任何你喜歡的固定路徑）
+   > 用 `git clone` 資料夾會正確命名為 `jason-memory`。若改用 GitHub 頁面上的
+   > **Download ZIP**，解壓縮出來的資料夾會被 GitHub 命名成
+   > `jason-memory-master`（`<repo>-<分支名稱>` 是 GitHub ZIP 下載的固定命名規則，
+   > 不是這個專案的問題）。兩種方式都能用——後面所有指令都是叫你填「絕對路徑」，
+   > 不要求資料夾一定要叫 `jason-memory`；想跟文件裡的範例路徑一致的話，
+   > 解壓後手動把資料夾改名回 `jason-memory` 即可。
 2. **選一個 `<MEMORY_ROOT>`**：實際存放記憶筆記的資料夾，例如你的專案下 `.jason-memory/`。把 [`templates/MEMORY.md`](templates/MEMORY.md) 複製進去當作起始索引檔
 3. **載入規則**：打開 [`CLAUDE.md`](CLAUDE.md)，把裡面所有 `<MEMORY_ROOT>` 佔位符換成你在步驟 2 選的實際路徑，然後：
    - 專案還沒有 `CLAUDE.md` 的話，直接把這個檔案整份複製到專案根目錄，命名為 `CLAUDE.md`
@@ -362,8 +368,6 @@ Jason-memory 是**單一專案、單一寫入者、個人規模**的工具，目
 
 ---
 
-## 授權與致謝
+## 授權
 
 MIT License，見 [LICENSE](LICENSE)。
-
-Jason-memory 改寫自 [tinqiao-oss/engramory](https://github.com/tinqiao-oss/engramory)（同為 MIT 授權），沿用其「Markdown 檔案 + 常駐索引 + 策展紀律」的核心設計；Jason-memory 的差異主要在於把 `feedback` 類型收窄為「踩坑教訓 + 驗證有效的做法」，並明確要求 Agent 自我判斷、不依賴使用者主動要求記憶。
