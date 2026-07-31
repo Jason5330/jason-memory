@@ -114,15 +114,50 @@ metadata:
 2. **選一個 `<MEMORY_ROOT>`**：實際存放記憶筆記的資料夾，例如你的專案下 `.jason-memory/`。把 [`templates/MEMORY.md`](templates/MEMORY.md) 複製進去當作起始索引檔
 3. **載入規則**：打開 [`CLAUDE.md`](CLAUDE.md)，把裡面所有 `<MEMORY_ROOT>` 佔位符換成你在步驟 2 選的實際路徑，然後：
    - 專案還沒有 `CLAUDE.md` 的話，直接把這個檔案整份複製到專案根目錄，命名為 `CLAUDE.md`
-   - 專案已經有 `CLAUDE.md` 的話，把 `## Memory (Jason-memory)` 以下的內容貼進你既有的 `CLAUDE.md`（或貼進 `~/.claude/CLAUDE.md`，讓所有專案都生效）
+   - 專案已經有 `CLAUDE.md` 的話，把 `## 記憶（Jason-memory）` 以下的內容貼進你既有的 `CLAUDE.md`（或貼進 `~/.claude/CLAUDE.md`，讓所有專案都生效）
 4. **（強烈建議）註冊 hook**：見下一節
 5. 若這個專案本身是 git 專案，記得把 `<MEMORY_ROOT>` 加進 `.gitignore`——記憶內容是明碼純文字，不該進版本控制
 
-若使用其他 host（Cursor、Cline、Windsurf、Codex…），原理相同：把 `CLAUDE.md` 裡 `## Memory (Jason-memory)` 以下的內容貼進該 host 的「永遠載入」規則檔即可；各 host 的 hook 機制不同，是否能做到強制擋寫入視 host 而定（詳見下一節）。
+> ⚠️ **只把整包資料夾複製進專案，不會有任何效果。** 上面的第 2、3 步是必要的初始化，
+> 不是選配——在那之前，`CLAUDE.md` 裡的 `<MEMORY_ROOT>` 還是字面上的佔位符，
+> 專案裡也還沒有真正的記憶庫（沒有 `MEMORY.md` 索引檔），Agent 不會有任何記憶動作，
+> 也不會自己知道要去做這件事。
 
-### 不想手動裝？直接叫你的 Agent 幫你裝
+若使用其他 host（Cursor、Cline、Windsurf、Codex…），原理相同：把 `CLAUDE.md` 裡 `## 記憶（Jason-memory）` 以下的內容貼進該 host 的「永遠載入」規則檔即可；各 host 的 hook 機制不同，是否能做到強制擋寫入視 host 而定（詳見下一節）。
 
-如果你是在 Claude Code（或其他能讀寫檔案、能執行指令的 Agent host）裡使用，也可以把安裝步驟丟給 Agent 做，不用自己手動編輯 JSON/Markdown。往下看「[Hook：容量上限強制](#hook容量上限強制)」跟「[健檢（Health Check）](#健檢health-check)」兩節裡的提示詞範本。
+### 不想手動做這些步驟？把這段初始化提示詞丟給 Agent
+
+複製貼上，Agent 就會照順序把上面 1～5 步驟做完，並且**實際打開檔案驗證過**才回報完成：
+
+```
+請幫我在這個專案初始化 Jason-memory 記憶系統：
+
+1. Jason-memory 框架的原始碼在 <你下載/clone 下來的絕對路徑>
+   （資料夾名稱可能是 jason-memory 或 jason-memory-master，不影響後續操作）
+
+2. 幫我選一個 <MEMORY_ROOT>（實際存放記憶筆記的資料夾）：
+   預設用專案根目錄下的 .jason-memory/（不存在的話直接建立），
+   除非我另外指定路徑
+
+3. 把 <框架路徑>/templates/MEMORY.md 複製一份到 <MEMORY_ROOT>/MEMORY.md，
+   當作起始索引檔
+
+4. 讀出 <框架路徑>/CLAUDE.md 的內容，把裡面所有 <MEMORY_ROOT> 佔位符
+   換成第 2 步選定的實際路徑，然後：
+   - 這個專案根目錄還沒有 CLAUDE.md 的話，直接把換好路徑的內容
+     寫成專案根目錄的 CLAUDE.md
+   - 已經有 CLAUDE.md 的話，把「## 記憶（Jason-memory）」以下的內容
+     合併進去，不要覆蓋掉既有內容
+
+5. 如果這個專案是 git 專案，確認 .gitignore 有排除 <MEMORY_ROOT>，
+   沒有的話幫我加一行
+
+6. 做完之後，實際打開專案根目錄的 CLAUDE.md 讀一次，確認裡面
+   不再殘留任何 <MEMORY_ROOT> 字樣、且 <MEMORY_ROOT>/MEMORY.md
+   這個檔案真的存在，把檢查結果告訴我，不要只說「初始化完成」
+```
+
+初始化完成之後，容量上限的 hook 註冊、以及記憶庫的健檢，是另外兩件事，各自的提示詞在「[Hook：容量上限強制](#hook容量上限強制)」跟「[健檢（Health Check）](#健檢health-check)」兩節裡。
 
 ---
 
