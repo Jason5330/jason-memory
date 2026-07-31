@@ -127,34 +127,23 @@ metadata:
 
 ### 不想手動做這些步驟？把這段初始化提示詞丟給 Agent
 
-複製貼上，Agent 就會照順序把上面 1～5 步驟做完，並且**實際打開檔案驗證過**才回報完成：
+複製貼上，Agent 就會照順序把上面 1～5 步驟做完，並且實際驗證過才回報完成：
 
 ```
 請幫我在這個專案初始化 Jason-memory 記憶系統：
 
-1. Jason-memory 框架的原始碼在 <你下載/clone 下來的絕對路徑>
-   （資料夾名稱可能是 jason-memory 或 jason-memory-master，不影響後續操作）
+1. 框架原始碼在 <絕對路徑>
 
-2. 幫我選一個 <MEMORY_ROOT>（實際存放記憶筆記的資料夾）：
-   預設用專案根目錄下的 .jason-memory/（不存在的話直接建立），
-   除非我另外指定路徑
+2. 選一個 <MEMORY_ROOT>（預設 .jason-memory/，除非我另外指定），建立起來，
+   用 templates/MEMORY.md 當起始索引檔
 
-3. 把 <框架路徑>/templates/MEMORY.md 複製一份到 <MEMORY_ROOT>/MEMORY.md，
-   當作起始索引檔
+3. 把 CLAUDE.md 套用到專案根目錄：<MEMORY_ROOT> 佔位符換成實際路徑；
+   根目錄沒有 CLAUDE.md 就直接建立，有的話合併「## 記憶」那節進去、不要覆蓋
 
-4. 讀出 <框架路徑>/CLAUDE.md 的內容，把裡面所有 <MEMORY_ROOT> 佔位符
-   換成第 2 步選定的實際路徑，然後：
-   - 這個專案根目錄還沒有 CLAUDE.md 的話，直接把換好路徑的內容
-     寫成專案根目錄的 CLAUDE.md
-   - 已經有 CLAUDE.md 的話，把「## 記憶（Jason-memory）」以下的內容
-     合併進去，不要覆蓋掉既有內容
+4. 是 git 專案的話把 <MEMORY_ROOT> 加進 .gitignore
 
-5. 如果這個專案是 git 專案，確認 .gitignore 有排除 <MEMORY_ROOT>，
-   沒有的話幫我加一行
-
-6. 做完之後，實際打開專案根目錄的 CLAUDE.md 讀一次，確認裡面
-   不再殘留任何 <MEMORY_ROOT> 字樣、且 <MEMORY_ROOT>/MEMORY.md
-   這個檔案真的存在，把檢查結果告訴我，不要只說「初始化完成」
+5. 完成後打開專案根目錄的 CLAUDE.md 讀一次，確認沒有殘留 <MEMORY_ROOT>
+   字樣、且 <MEMORY_ROOT>/MEMORY.md 存在，回報實際檢查結果
 ```
 
 初始化完成之後，容量上限的 hook 註冊、以及記憶庫的健檢，是另外兩件事，各自的提示詞在「[Hook：容量上限強制](#hook容量上限強制)」跟「[健檢（Health Check）](#健檢health-check)」兩節裡。
@@ -225,29 +214,22 @@ hook 會**模擬**這次編輯套用後的結果，同時檢查「行數」跟�
 在 Claude Code（或其他能讀寫檔案、能跑指令的 Agent host）裡，把下面這段複製貼上，Agent 就會自己判斷環境、註冊、並實際驗證：
 
 ```
-請幫我在這個專案（專案層級，不要動全域設定）註冊 Jason-memory 的記憶索引容量上限 hook：
+請幫我在這個專案（專案層級）註冊 Jason-memory 的記憶索引容量上限 hook：
 
-1. Jason-memory 框架的原始碼在 <你 clone/複製下來的絕對路徑>，hook 腳本是
-   hooks/jason_index_guard.py，範例設定在 hooks/settings.snippet.json
+1. 框架原始碼在 <絕對路徑>，hook 是 hooks/jason_index_guard.py，
+   範例設定在 hooks/settings.snippet.json
 
-2. 偵測我這台機器上實際可用的 Python 直譯器指令
-   （Windows 通常是 python，macOS/Linux 通常是 python3；
-   不確定的話用 `python -c "import sys; print(sys.executable)"` 找出絕對路徑，
-   用那個最保險）
+2. 偵測這台機器實際可用的 Python 指令（Windows 通常 python，macOS/Linux
+   通常 python3；不確定就用 `python -c "import sys; print(sys.executable)"` 找絕對路徑）
 
-3. 在這個專案底下建立或更新 .claude/settings.json，
-   註冊一個 PreToolUse hook，matcher 設為 "Edit|Write|MultiEdit"，
-   command/args 依照 hooks/settings.snippet.json 的格式，
-   把腳本路徑換成第 1 點的絕對路徑
+3. 在 .claude/settings.json 註冊 PreToolUse hook，matcher 設
+   "Edit|Write|MultiEdit"，已有其他 hook 的話用合併的、不要覆蓋
 
-4. 如果 .claude/settings.json 已經存在且已有其他 hook，
-   用合併的方式加進去，不要覆蓋掉既有設定
-
-5. 裝完之後，實際模擬一次 250 行的 Write 呼叫去測試這個 hook，
-   確認它真的會回傳 deny，把結果貼給我看，不要只說「裝好了」
+4. 模擬一次 250 行的 Write 呼叫測試，確認真的回傳 deny，把結果貼給我看，
+   不要只說「裝好了」
 ```
 
-第 2 點是關鍵——不同機器上能用的 Python 指令不一樣，跳過這步直接照抄範例的 `python3` 在 Windows 上很容易導致 hook 靜默失效；第 4 點避免整個檔案被覆蓋洗掉你既有的其他 hook；第 5 點強迫 Agent 交出可驗證的證據，而不是自稱「應該裝好了」。
+第 2 點是關鍵——不同機器上能用的 Python 指令不一樣，跳過這步直接照抄範例的 `python3` 在 Windows 上很容易導致 hook 靜默失效；第 3 點避免整個檔案被覆蓋洗掉你既有的其他 hook；第 4 點強迫 Agent 交出可驗證的證據，而不是自稱「應該裝好了」。
 
 ### 如何驗證 hook 真的有效
 
@@ -325,23 +307,17 @@ jason-doctor: clean — index 29 lines / 1.3 KB, 0 note(s), no broken pointers, 
 ```
 請幫我對這個專案的 Jason-memory 記憶庫做一次健檢：
 
-1. 記憶庫位置（MEMORY_ROOT）在 <你的 MEMORY_ROOT 路徑，例如 .jason-memory/>，
-   Jason-memory 框架的原始碼在 <你 clone/複製下來的絕對路徑>
+1. MEMORY_ROOT 在 <路徑>，框架原始碼在 <絕對路徑>
 
-2. 先用 tools/jason_check.py 檢查 MEMORY.md 索引本身有沒有超過容量上限
+2. 跑 tools/jason_check.py 檢查 MEMORY.md 容量，再跑 tools/jason_doctor.py
+   做完整檢查（第一次跑、還沒照規範整理過的話先加 --no-schema）
 
-3. 再用 tools/jason_doctor.py 做完整檢查
-   （如果這是第一次對這個記憶庫跑健檢、還沒有照 Jason-memory 規範整理過，
-   先加 --no-schema 只看結構問題就好，不要一次被格式警告淹沒）
+3. 把兩個工具的完整輸出貼給我，不要只總結說「沒問題」
 
-4. 把兩個工具的完整輸出貼給我看，不要只總結說「沒問題」
-
-5. 如果有斷掉的連結、孤兒筆記檔、超過容量上限、或 frontmatter 格式錯誤，
-   列出具體要怎麼修（哪個檔案、哪個問題），
-   但先跟我確認要不要修，不要自己直接刪除或改動筆記內容
+4. 有問題的話列出具體怎麼修，但先問過我再動手，不要自己刪除或改動筆記內容
 ```
 
-第 5 點的「先確認再動手」很重要——健檢抓到的問題有時候需要刪除或合併筆記（例如孤兒檔案、過時的記憶），這類操作一旦做錯就回不去了，不該讓 Agent 自己默默決定。
+第 4 點的「先確認再動手」很重要——健檢抓到的問題有時候需要刪除或合併筆記（例如孤兒檔案、過時的記憶），這類操作一旦做錯就回不去了，不該讓 Agent 自己默默決定。
 
 ---
 
