@@ -408,7 +408,7 @@ honestly claim that an automatic compact produced a complete semantic summary.
 
 For behaviour you want truly always-on (e.g. "always check memory at the start of
 a task"), put a one-line pointer in your host's always-loaded rules — Claude Code:
-`CLAUDE.md` or `~/.claude/CLAUDE.md`. A ready snippet is in `rules-snippet.md`.
+`CLAUDE.md` or `~/.claude/CLAUDE.md`. A ready-to-use file is `CLAUDE.md` in this repo.
 
 This is why Jason is **0.x / experimental**: the hard cap is deterministic only
 for the matched direct-edit tools (not a global write guard), and the discipline is

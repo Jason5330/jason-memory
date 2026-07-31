@@ -1,10 +1,17 @@
 # Jason-memory — always-on pointer
 
-Paste this into your host's **always-loaded** rules (Claude Code: project
-`CLAUDE.md` or `~/.claude/CLAUDE.md`) so the memory discipline applies even on
-tasks where this isn't loaded as a by-relevance skill. Keep it short — the full
-protocol lives in `SKILL.md`. Replace every `<MEMORY_ROOT>` below with your
-store's actual path (e.g. `.jason-memory/`) before pasting.
+This file is a ready-to-use project `CLAUDE.md`. Two ways to use it:
+
+- **New project, no `CLAUDE.md` yet:** copy this file as-is to your project
+  root as `CLAUDE.md`.
+- **Already have a `CLAUDE.md`:** copy everything from `## Memory (Jason-memory)`
+  onward into your existing file (or `~/.claude/CLAUDE.md` for a rule that
+  applies to every project) so the memory discipline applies even on tasks
+  where this isn't loaded as a by-relevance skill.
+
+Keep it short — the full protocol lives in `SKILL.md`. **Before use, replace
+every `<MEMORY_ROOT>` below with your store's actual path** (e.g.
+`.jason-memory/`).
 
 ---
 

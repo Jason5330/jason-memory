@@ -87,7 +87,7 @@ metadata:
 
 拿不準的時候**傾向寫**：漏記一個教訓的代價（重蹈覆轍）比多記一則筆記的代價（之後花點時間整理）更高。
 
-完整規則文字見 [`rules-snippet.md`](rules-snippet.md)，詳細協議規格見 [`SKILL.md`](SKILL.md)。
+完整規則文字見 [`CLAUDE.md`](CLAUDE.md)，詳細協議規格見 [`SKILL.md`](SKILL.md)。
 
 ---
 
@@ -99,13 +99,17 @@ metadata:
 
 1. **下載/clone 這個 repo** 到你想要的位置（例如專案內的 `jason-memory/`，或任何你喜歡的固定路徑）
 2. **選一個 `<MEMORY_ROOT>`**：實際存放記憶筆記的資料夾，例如你的專案下 `.jason-memory/`。把 [`templates/MEMORY.md`](templates/MEMORY.md) 複製進去當作起始索引檔
-3. **載入規則**：打開 [`rules-snippet.md`](rules-snippet.md)，把裡面所有 `<MEMORY_ROOT>` 佔位符換成你在步驟 2 選的實際路徑，整份貼進：
-   - `~/.claude/CLAUDE.md`（全部專案都生效）
-   - 或專案內的 `CLAUDE.md`（只該專案生效，建議這樣做，避免影響其他無關專案）
+3. **載入規則**：打開 [`CLAUDE.md`](CLAUDE.md)，把裡面所有 `<MEMORY_ROOT>` 佔位符換成你在步驟 2 選的實際路徑，然後：
+   - 專案還沒有 `CLAUDE.md` 的話，直接把這個檔案整份複製到專案根目錄，命名為 `CLAUDE.md`
+   - 專案已經有 `CLAUDE.md` 的話，把 `## Memory (Jason-memory)` 以下的內容貼進你既有的 `CLAUDE.md`（或貼進 `~/.claude/CLAUDE.md`，讓所有專案都生效）
 4. **（強烈建議）註冊 hook**：見下一節
 5. 若這個專案本身是 git 專案，記得把 `<MEMORY_ROOT>` 加進 `.gitignore`——記憶內容是明碼純文字，不該進版本控制
 
-若使用其他 host（Cursor、Cline、Windsurf、Codex…），原理相同：把 `rules-snippet.md` 貼進該 host 的「永遠載入」規則檔即可；各 host 的 hook 機制不同，是否能做到強制擋寫入視 host 而定（詳見下一節）。
+若使用其他 host（Cursor、Cline、Windsurf、Codex…），原理相同：把 `CLAUDE.md` 裡 `## Memory (Jason-memory)` 以下的內容貼進該 host 的「永遠載入」規則檔即可；各 host 的 hook 機制不同，是否能做到強制擋寫入視 host 而定（詳見下一節）。
+
+### 不想手動裝？直接叫你的 Agent 幫你裝
+
+如果你是在 Claude Code（或其他能讀寫檔案、能執行指令的 Agent host）裡使用，也可以把安裝步驟丟給 Agent 做，不用自己手動編輯 JSON/Markdown。往下看「[Hook：容量上限強制](#hook容量上限強制)」跟「[健檢（Health Check）](#健檢health-check)」兩節裡的提示詞範本。
 
 ---
 
@@ -167,6 +171,35 @@ hook 會**模擬**這次編輯套用後的結果，同時檢查「行數」跟�
 1. **`args` 裡的路徑必須是絕對路徑**——這是 Claude Code hook 的 EXEC 執行形式（不經過 shell），路徑會被原樣傳遞，不用處理引號跳脫，但也代表不能用 `~` 或相對路徑
 2. **`command` 依系統而定**：Windows 通常是 `"python"`；macOS/Linux 通常只有 `python3`（沒有裸的 `python`）；最保險的做法是用 `python -c "import sys; print(sys.executable)"` 印出直譯器的絕對路徑，直接填那個
 3. **裝完一定要驗證**——如果 `command` 指到一個實際上叫不動的直譯器（例如 Windows 上裝了 `python3` 這個名字），Claude Code 會靜默地 fail-open（hook 出錯 = 直接放行），你會完全不知道 hook 根本沒在運作。驗證方法見下方
+
+### 不想自己編輯 JSON？把這段提示詞丟給 Agent
+
+在 Claude Code（或其他能讀寫檔案、能跑指令的 Agent host）裡，把下面這段複製貼上，Agent 就會自己判斷環境、註冊、並實際驗證：
+
+```
+請幫我在這個專案（專案層級，不要動全域設定）註冊 Jason-memory 的記憶索引容量上限 hook：
+
+1. Jason-memory 框架的原始碼在 <你 clone/複製下來的絕對路徑>，hook 腳本是
+   hooks/jason_index_guard.py，範例設定在 hooks/settings.snippet.json
+
+2. 偵測我這台機器上實際可用的 Python 直譯器指令
+   （Windows 通常是 python，macOS/Linux 通常是 python3；
+   不確定的話用 `python -c "import sys; print(sys.executable)"` 找出絕對路徑，
+   用那個最保險）
+
+3. 在這個專案底下建立或更新 .claude/settings.json，
+   註冊一個 PreToolUse hook，matcher 設為 "Edit|Write|MultiEdit"，
+   command/args 依照 hooks/settings.snippet.json 的格式，
+   把腳本路徑換成第 1 點的絕對路徑
+
+4. 如果 .claude/settings.json 已經存在且已有其他 hook，
+   用合併的方式加進去，不要覆蓋掉既有設定
+
+5. 裝完之後，實際模擬一次 250 行的 Write 呼叫去測試這個 hook，
+   確認它真的會回傳 deny，把結果貼給我看，不要只說「裝好了」
+```
+
+第 2 點是關鍵——不同機器上能用的 Python 指令不一樣，跳過這步直接照抄範例的 `python3` 在 Windows 上很容易導致 hook 靜默失效；第 4 點避免整個檔案被覆蓋洗掉你既有的其他 hook；第 5 點強迫 Agent 交出可驗證的證據，而不是自稱「應該裝好了」。
 
 ### 如何驗證 hook 真的有效
 
@@ -237,6 +270,31 @@ jason-doctor: clean — index 29 lines / 1.3 KB, 0 note(s), no broken pointers, 
 
 若有問題會列出每一項（斷掉的連結指到哪個不存在的檔案、哪個筆記缺了哪個欄位），照著訊息修就好。
 
+### 不想自己下指令？把這段提示詞丟給 Agent
+
+把下面這段複製貼給 Agent，就會照順序跑完兩層檢查、把完整結果貼給你，並且**先問過你**才動手修：
+
+```
+請幫我對這個專案的 Jason-memory 記憶庫做一次健檢：
+
+1. 記憶庫位置（MEMORY_ROOT）在 <你的 MEMORY_ROOT 路徑，例如 .jason-memory/>，
+   Jason-memory 框架的原始碼在 <你 clone/複製下來的絕對路徑>
+
+2. 先用 tools/jason_check.py 檢查 MEMORY.md 索引本身有沒有超過容量上限
+
+3. 再用 tools/jason_doctor.py 做完整檢查
+   （如果這是第一次對這個記憶庫跑健檢、還沒有照 Jason-memory 規範整理過，
+   先加 --no-schema 只看結構問題就好，不要一次被格式警告淹沒）
+
+4. 把兩個工具的完整輸出貼給我看，不要只總結說「沒問題」
+
+5. 如果有斷掉的連結、孤兒筆記檔、超過容量上限、或 frontmatter 格式錯誤，
+   列出具體要怎麼修（哪個檔案、哪個問題），
+   但先跟我確認要不要修，不要自己直接刪除或改動筆記內容
+```
+
+第 5 點的「先確認再動手」很重要——健檢抓到的問題有時候需要刪除或合併筆記（例如孤兒檔案、過時的記憶），這類操作一旦做錯就回不去了，不該讓 Agent 自己默默決定。
+
 ---
 
 ## 檔案結構
@@ -245,7 +303,7 @@ jason-doctor: clean — index 29 lines / 1.3 KB, 0 note(s), no broken pointers, 
 jason-memory/                  ← 這個框架本身（放進版控、可以整包複製到別的專案）
 ├── README.md                  ← 這份文件
 ├── LICENSE                    ← MIT
-├── rules-snippet.md           ← 貼進 CLAUDE.md 的規則片段
+├── CLAUDE.md                  ← 可直接當專案 CLAUDE.md 用的規則檔
 ├── SKILL.md                   ← 完整協議規格（給 Agent 當詳細參考）
 ├── hooks/
 │   ├── jason_index_guard.py   ← PreToolUse 容量上限 hook
