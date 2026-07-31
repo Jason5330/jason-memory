@@ -1,29 +1,29 @@
-# Memory Index (Jason-memory)
+# 記憶索引（Jason-memory）
 
-> Pointers only — the actual content lives in the linked files, never here.
-> Soft cap 150 lines / 20 KB (warn). Hard cap 200 lines / 25 KB (compact first).
-> One line per memory: `- [<title>](<slug>.md) — <one-line hook>`
-> Plain-text & unencrypted: never store secret *values* here (only where they
-> live); keep this store git-ignored and out of cloud-synced / backed-up folders.
+> 這裡只放指標——實際內容都在連結的檔案裡，不放在這裡。
+> 軟性上限 150 行 / 20 KB（警告）。硬性上限 200 行 / 25 KB（先壓縮再寫）。
+> 一行一則：`- [<標題>](<slug>.md) — <一句話摘要>`
+> 明碼未加密：絕對不要把密碼等機密的「值」存在這裡（只記放在哪）；
+> 這個資料夾要 git-ignore，也不該放在雲端同步/備份的路徑裡。
 
 ## user
-<!-- who the user is: identity, role, expertise, durable preferences ABOUT THEM.
-     A preference about how YOU work ("reply in Chinese") is feedback, not user. -->
+<!-- 使用者是誰：身份、角色、專長、對「他本人」的長期偏好。
+     「回覆用中文」這種對 Agent 行為的偏好屬於 feedback，不是 user。 -->
 
 ## feedback
-<!-- THE CORE OF THIS STORE. Only two things go here, self-judged or user-flagged:
-     1) a mistake/pitfall made in this project, corrected, and worth never repeating
-     2) an approach that was tried and confirmed to work
-     Each note must carry Why: (what went wrong / what was confirmed, and the
-     evidence) and How to apply: (when this should change future behavior).
-     Do NOT put general facts, task state, or one-off trivia here — that's project. -->
+<!-- 這個記憶庫的核心，不管是自己判斷還是使用者指出都算，只放兩件事：
+     1) 這個專案裡踩過的坑，已修正，且值得未來不再重犯
+     2) 嘗試過並確認有效的做法
+     每則筆記都要有 Why:（錯在哪/驗證了什麼，附證據）
+     跟 How to apply:（未來該怎麼改變行為）。
+     一般性事實、任務狀態、一次性瑣事不要放這裡——那是 project。 -->
 
 ## project
-<!-- goals/status/decisions/constraints/blockers/next step needed to resume.
-     Re-verify code/git/test pointers; retire completed transient state.
-     Absolute dates. Why: / How to apply: -->
+<!-- 目標/現況/決策/限制條件/卡點/下一步——恢復未完成工作所需的資訊。
+     要重新驗證 code/git/測試相關的指標；已完成的暫時性狀態要清掉。
+     用絕對日期。Why: / How to apply: -->
 
 ## reference
-<!-- pointers to external resources: URLs, dashboards, tickets, log paths -->
+<!-- 外部資源指標：URL、儀表板、票單、log 路徑 -->
 
 ---

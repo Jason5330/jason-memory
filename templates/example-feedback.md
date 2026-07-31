@@ -1,18 +1,17 @@
 ---
 name: verify-before-done
-description: Grep to confirm a change before reporting it done
+description: 回報完成前要先 grep 確認改動真的生效
 type: feedback
 created: 2026-06-13
 updated: 2026-06-13
 ---
 
-Before telling the user a code change is complete, run a quick search to confirm
-the change actually landed where intended.
+在跟使用者說「這個改動完成了」之前，先做一次快速搜尋，確認改動真的落在預期的地方。
 
-**Why:** the user has been burned before by "done" reports for edits that silently
-failed to apply, so an unverified "done" costs their trust.
+**Why:** 使用者之前被「回報完成，但改動其實默默失敗沒套用」坑過，沒驗證過就說
+「完成了」會讓使用者失去信任。
 
-**How to apply:** after any edit, grep for the changed symbol/string and show the
-matching line(s) in the report, or run the relevant test and quote the result.
+**How to apply:** 每次編輯之後，grep 改動的符號/字串，把對到的那幾行貼在回報裡；
+或是跑相關測試，把結果貼出來。
 
-Related: [[code-change-hygiene]]
+相關：[[code-change-hygiene]]

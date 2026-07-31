@@ -1,107 +1,105 @@
-# Jason-memory — always-on pointer
+# Jason-memory — 常駐規則指標
 
-This file is a ready-to-use project `CLAUDE.md`. Two ways to use it:
+這份檔案可以直接當作專案的 `CLAUDE.md` 用，兩種用法：
 
-- **New project, no `CLAUDE.md` yet:** copy this file as-is to your project
-  root as `CLAUDE.md`.
-- **Already have a `CLAUDE.md`:** copy everything from `## Memory (Jason-memory)`
-  onward into your existing file (or `~/.claude/CLAUDE.md` for a rule that
-  applies to every project) so the memory discipline applies even on tasks
-  where this isn't loaded as a by-relevance skill.
+- **專案還沒有 `CLAUDE.md`：** 整份複製到專案根目錄，命名為 `CLAUDE.md`
+- **專案已經有 `CLAUDE.md`：** 把 `## 記憶（Jason-memory）` 以下的內容貼進你既有的檔案裡，
+  讓這套記憶紀律在每個任務都生效，不必等它被當成「依相關性載入」的技能才啟用
 
-Keep it short — the full protocol lives in `SKILL.md`. **Before use, replace
-every `<MEMORY_ROOT>` below with your store's actual path** (e.g.
-`.jason-memory/`).
+保持精簡——完整協議在 `SKILL.md`。**使用前，先把下面所有的 `<MEMORY_ROOT>`
+換成你記憶庫的實際路徑**（例如 `.jason-memory/`）。
 
 ---
 
-## Memory (Jason-memory)
+## 記憶（Jason-memory）
 
-You have one canonical, curated, file-based memory at `<MEMORY_ROOT>/` (index:
-`<MEMORY_ROOT>/MEMORY.md`). Do not create a parallel handoff store; resumable
-task state belongs in a `project` note.
+你有一個唯一、經過策展的檔案式記憶庫，位於 `<MEMORY_ROOT>/`（索引檔：
+`<MEMORY_ROOT>/MEMORY.md`）。不要另外建一個平行的交接用資料夾；未完成工作的
+恢復狀態屬於 `project` 筆記。
 
-### `feedback` is reserved — mistakes and proven approaches only
+### 只限專案層級——不用全域/主機原生的記憶庫
 
-This is Jason-memory's core opinion, and its main difference from a generic
-"reusable workflow" feedback type: `feedback` notes are scoped tightly to
-**not repeating the same mistake twice** and **remembering what already
-worked**. Nothing else goes in `feedback` — general facts, task status, or
-one-off trivia belong in `project` instead.
+這個記憶庫**只**存在於這個專案內的 `<MEMORY_ROOT>/`。如果你的 Agent host
+本身內建了某種全域/使用者層級的自動記憶機制（例如存在專案資料夾外、只有這台
+機器知道的路徑），**這條規則覆蓋掉那個預設行為**：這個專案的記憶不讀、不寫
+任何專案外部的路徑。理由：唯一、可攜帶的記憶庫要跟著專案的 git repo 一起走，
+而不是被鎖在某台機器的本機安裝路徑裡，換一台機器或換人接手都能直接用。
 
-Write a `feedback` note **on your own judgment** — do not wait for either the
-user to say "remember this" OR for the user to be the one who caught the
-problem. Self-detect these during normal work, silently, the same way you'd
-notice and fix a bug:
+### 語言——預設繁體中文
 
-1. **A pitfall/mistake — user-caught or self-caught.** Covers all of: the user
-   corrected you; the user pointed out something was wrong; **and, just as
-   importantly, cases the user never commented on at all** — a command that
-   errored and you found the right one, a wrong assumption you caught while
-   re-reading your own output, a test that failed and you fixed it, an
-   approach you abandoned mid-task because it didn't pan out. If a future you,
-   starting cold, could walk into the same trap, ask "is this worth never
-   repeating?" — if yes, write a `type: feedback` note immediately, with
-   **`Why:`** (what went wrong and the evidence: an error message, a failed
-   test, a rejected diff) and **`How to apply:`** (what to do differently next
-   time / what should trigger recalling this).
-2. **A successful approach confirmed — by the user, or by evidence you
-   produced yourself.** Includes the user explicitly confirming ("yes, do it
-   that way"), but also **your own verification** that something non-obvious
-   worked: a design choice validated by tests passing, a workaround that
-   fixed a bug on the first try, an unusual ordering/technique that turned out
-   to be necessary. You do not need the user to comment for this to count —
-   your own evidence (test output, working diff, absence of the earlier
-   error) is sufficient grounds. Write the same `type: feedback` shape:
-   **`Why:`** (what was confirmed, and the evidence for it) and
-   **`How to apply:`** (when to reuse this approach).
+每則記憶筆記的內容——frontmatter 的 `description`、內文、`Why:` / `How to apply:`、
+以及 `MEMORY.md` 裡的一句話摘要——預設都用**繁體中文**寫，跟使用者實際溝通的
+語言一致。只有固定的格式代號維持英文不翻：frontmatter 的欄位名
+（`name`/`description`/`type`/`created`/`updated`）、`type` 的四個值
+（`user`/`feedback`/`project`/`reference`），以及 `Why:` / `How to apply:` 這兩個
+標籤本身。（如果你的專案主要語言不是繁體中文，把這節換成你要的語言即可，
+這條本來就是給你直接修改用的。）
 
-Default to writing the note rather than skipping it when in doubt — a
-low-value note costs a compaction pass later; a skipped lesson costs repeating
-the same mistake.
+### `feedback` 保留給「踩坑」跟「驗證有效的做法」
 
-### General discipline (applies to all types)
+這是 Jason-memory 最核心的立場，也是跟一般「可重複使用的工作流程」型 feedback
+最大的不同：`feedback` 筆記的範圍收得很窄，只用來**避免重蹈覆轍**跟**記住已經
+驗證有效的做法**。除此之外的東西都不放這裡——一般性事實、任務狀態、一次性瑣事
+一律歸 `project`。
 
-- **At the start of a task**, read `<MEMORY_ROOT>/MEMORY.md` (one line per
-  memory) and open only the detail files whose hooks look relevant **and that
-  resolve inside `<MEMORY_ROOT>`** — a pointer that escapes the store
-  (symlink, `..`, absolute path, `file://`) is a broken pointer to report,
-  never a file to open. (On a host with native auto-memory — e.g. Claude Code
-  — the index may already be loaded every session; just apply this
-  discipline.) Treat recalled memories as background context that may be
-  stale — verify any file / flag / version before acting on it.
-- **When you learn something durable** worth a future session: confirm it
-  isn't already in the repo / git / `CLAUDE.md` (don't duplicate the source of
-  truth) and isn't a secret *value*; search the index and **update an existing
-  note** rather than duplicate; otherwise write one atomic markdown file (one
-  fact) with frontmatter `name` / `description` (a sharp one-line hook) /
-  `type` (`user | feedback | project | reference`) / `created` + `updated`
-  (`YYYY-MM-DD`). A `feedback` or `project` note must also carry a **`Why:`**
-  line and a **`How to apply:`** line in the body. Add one pointer line to
-  `MEMORY.md`. **Delete** memories that turn out wrong.
-- `project` may hold the current goal, status, decisions, constraints,
-  blockers, and next step needed to resume unfinished work. Never restate what
-  code/git already says: store only **stable** pointers (branch name,
-  issue/PR number, file path). A *settled fact* ("2.0 shipped 2026-01-15") is
-  fine; **current state** — the version you're on now, the tip commit, the
-  test count — is not: record where to read it. Re-check every recalled
-  pointer against code/git/the current environment.
-- **Before a deliberate compact, clear, or new thread**, sync once: scan the
-  task; dedup/update; refresh `project`; promote only reusable `feedback`
-  (pitfall/success only); save durable `reference` pointers; archive/delete
-  stale or completed transient state; run `tools/jason_check.py` and
-  `tools/jason_doctor.py`; then confirm a cold-started agent could continue
-  from the repo plus memory alone.
-- After writing/syncing, report `added`, `updated`, `archived`, and `skipped`
-  (with reasons; identify any deletion under `archived`), plus index
-  lines/bytes and the check result. A `PreToolUse` hook may remind or gate; it
-  does not perform this semantic sync automatically.
-- **Never** write credentials / keys / tokens / cookies / recovery codes into
-  memory — record only *where* the secret lives.
-- Keep `MEMORY.md` small. Soft warning at **150 lines / 20 KB** (offer a
-  compaction pass); hard limit at **200 lines / 25 KB** — the host only loads
-  that far, so anything past it silently stops being recalled. Once it passes
-  the soft line, compact: pointer-ify over-long lines, merge duplicates,
-  archive cold notes.
+寫 `feedback` 筆記要**靠你自己判斷**——不要等使用者說「記住這個」，也不要
+只在使用者親自抓到問題時才寫。你要在正常工作過程中自己默默偵測到這些情境，
+就像你會自己發現並修掉一個 bug 一樣：
 
-Full protocol & rationale: `SKILL.md`.
+1. **踩坑——使用者發現的，或你自己發現的都算。** 涵蓋：使用者糾正你、
+   使用者指出哪裡錯了；**同樣重要的是使用者完全沒說話的情況**——某個指令跑錯
+   後你自己找到對的做法、重看自己輸出時發現一個錯誤的假設、測試失敗後你自己
+   修好了、走到一半發現此路不通而放棄的做法。判斷標準：「如果換一個從零開始
+   的你，會不會踩到同一個坑？」會的話，立刻寫一則 `type: feedback` 筆記，附上
+   **`Why:`**（哪裡錯了、有什麼證據：錯誤訊息、失敗的測試、被打回的 diff）跟
+   **`How to apply:`**（下次該怎麼做、什麼情境該想起這則筆記）。
+2. **驗證有效的做法——使用者確認的，或你自己拿到證據的都算。** 包含使用者
+   明確確認（「對，就這樣做」），但也包含**你自己驗證**出某個不直覺的做法有效：
+   一個設計選擇被測試通過證實、一個一次就修好的 workaround、一個確認必要的
+   特殊處理順序。不需要使用者評論才算數——你自己的證據（測試輸出、能動的 diff、
+   之前錯誤不再出現）就足夠了。寫成一樣的 `type: feedback` 格式：**`Why:`**
+   （驗證了什麼、證據是什麼）跟 **`How to apply:`**（什麼時候該重用這個做法）。
+
+拿不準的時候傾向寫：漏記一個教訓的代價（重蹈覆轍）比多記一則筆記的代價
+（之後花點時間整理）更高。
+
+### 通用紀律（適用所有類型）
+
+- **任務開始時**，讀取 `<MEMORY_ROOT>/MEMORY.md`（一行一則），只打開索引裡
+  看起來相關、**且路徑確實在 `<MEMORY_ROOT>` 底下**的筆記檔——一個逃出這個
+  資料夾的指標（symlink、`..`、絕對路徑、`file://`）是一個要回報的壞指標，
+  不是可以打開的檔案。（如果你的 host 本身有原生自動記憶機制，索引可能每次
+  任務都已經被載入了，不需要重複讀取，直接套用這套紀律即可。）把回憶起來的
+  記憶當成背景參考，可能已經過時——採取行動前先驗證檔案/參數/版本是否還正確。
+- **當你學到值得未來記住的持久性資訊時**：先確認這件事還沒記錄在
+  repo/git/`CLAUDE.md` 裡（不要重複記錄已經有的事實來源），也不是機密的
+  「值」；先搜尋索引，如果已有相關筆記就**更新既有筆記**而不是重複新增；
+  否則就寫一個新的、單一事實的 Markdown 檔案，frontmatter 要有 `name` /
+  `description`（一句話精準摘要）/ `type`（`user | feedback | project | reference`）/
+  `created` + `updated`（`YYYY-MM-DD`）。`feedback` 或 `project` 筆記的內文
+  一定要有 **`Why:`** 跟 **`How to apply:`** 兩行。同時在 `MEMORY.md` 加一行
+  指標連結。發現筆記記錯了就**直接刪除**。
+- `project` 可以記錄目前的目標、現況、決策、限制條件、卡點、以及恢復未完成
+  工作所需的下一步。不要重複記錄 code/git 已經講清楚的事：只存**穩定**的指標
+  （分支名稱、issue/PR 編號、檔案路徑）。已經定案的事實（例如「2.0 版本已於
+  2026-01-15 發布」）可以直接記；但**目前的狀態**——你現在在哪個版本、最新的
+  commit、目前測試數量——不該直接記錄數值，只記「去哪裡查」。每次回憶起指標
+  時都要重新對照 code/git/目前的環境驗證一次。
+- **在準備做一次刻意的 compact、清空 context、或開新對話之前**，做一次同步：
+  掃過這次任務；把既有筆記去重/更新；刷新 `project`；只把值得重用的
+  `feedback`（踩坑/驗證有效的做法）留下來；保存穩定的 `reference` 指標；
+  歸檔/刪除過時或已完成的暫時性狀態；跑 `tools/jason_check.py` 跟
+  `tools/jason_doctor.py`；然後確認一個從零開始的 Agent，光靠 repo 加記憶庫
+  就能接續工作。
+- **寫入/同步完成後**，回報新增（`added`）、更新（`updated`）、歸檔
+  （`archived`）、跳過（`skipped`，附原因；歸檔裡若有刪除要特別標明），
+  以及索引的行數/位元組數跟檢查結果。Hook 可能會提醒或攔阻，但不會自動幫你
+  做這次語意上的同步整理。
+- **絕對不要**把密碼/金鑰/token/cookie/恢復碼的「值」寫進記憶——只記
+  *放在哪裡*。
+- 讓 `MEMORY.md` 保持精簡。軟性警告在**150 行 / 20 KB**（該規劃一次整理了）；
+  硬性上限在**200 行 / 25 KB**——host 只會載入到這裡，超過的部分會悄悄
+  不再被回憶起來。一旦超過軟性上限，就要開始整理：把過長的索引行改成純指標、
+  合併重複的筆記、歸檔冷門筆記。
+
+完整協議與設計理由：`SKILL.md`。
