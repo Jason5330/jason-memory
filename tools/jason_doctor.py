@@ -6,15 +6,15 @@ jason_doctor — consistency + protocol check for an Jason memory store.
     python tools/jason_doctor.py <MEMORY_ROOT> --no-schema  # structure only
 
 `--no-schema` skips the per-note frontmatter/protocol checks and runs only the
-structural checks (over-cap index, broken pointers, orphans, duplicate slugs) — use
+structural checks (optional index budget, broken pointers, orphans, duplicate slugs) — use
 it to health-check a store that isn't (yet) in strict Jason format, e.g. a
 host-native auto-memory store.
 
 Catches drift the per-write checks miss, on two levels:
 
-STRUCTURE (ISSUE -> exit 1): an over-cap index, index pointers to files that no
+STRUCTURE (ISSUE -> exit 1): an explicitly configured budget exceeded, index pointers to files that no
 longer exist, pointers OR note files (symlinks) that escape the store root, orphan
-notes that nothing references, duplicate note slugs — two files sharing a
+notes unreachable from the index (including isolated cycles), duplicate note slugs — two files sharing a
 basename, or two that differ only by case (they collide on a case-insensitive FS) —
 and an index pointer using a NON-REMOTE URL scheme (`file://…` names a local path,
 so it must be gated like any other path). Only a scheme on the remote allowlist in
@@ -29,7 +29,7 @@ hide a real orphan.
 
 Reads are bounded, because the store is attacker-influenceable and a planted or
 runaway file must not take down the validator meant to report it: an index far past
-the cap is reported and NOT parsed, and a note larger than NOTE_READ_CAP is flagged
+the parser safety limit is reported and NOT parsed, and a note larger than NOTE_READ_CAP is flagged
 rather than read. Echoed frontmatter fragments are quoted and truncated for the same
 reason — an agent reads this output, so a hostile note cannot flood or instruct it.
 
@@ -38,7 +38,7 @@ note must have well-formed frontmatter (no malformed lines, unclosed or malforme
 quotes, or a missing closing fence) carrying a non-empty `name`, `description`, a
 valid `type`
 (user|feedback|project|reference), and real-calendar `created` + `updated` dates;
-feedback/project notes must carry `Why:` + `How to apply:`. Soft hygiene is INFO
+feedback/project notes must carry non-empty `Why:` + `How to apply:` sections. Soft hygiene is INFO
 (exit 0): a `name` not matching the filename slug (tolerating `-`/`_`/case), and a
 note reachable only via a `[[wikilink]]` (not in the index, so it won't load at
 session start). Broken `[[wikilinks]]` are INFO (forward-reference stubs allowed).
@@ -56,8 +56,10 @@ miscased index pointer does: the FILESYSTEM decides. It resolves on a
 case-insensitive FS (Windows/macOS), where the link really does open that file,
 and stays broken on a case-sensitive one.
 
-Exit 0 = no issues; 1 = issues found (incl. an unreadable index). Caps via
-JASON_HARD / JASON_HARD_BYTES.
+Exit 0 = no issues; 1 = issues found (incl. an unreadable index). Optional budgets
+via JASON_HARD / JASON_HARD_BYTES; unset, invalid or non-positive = disabled.
+The 1 MiB index / 4 MiB note parser limits protect this diagnostic process, not
+the host's context window. Nothing intercepts writes.
 """
 import datetime
 import os
@@ -73,9 +75,9 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # incidental prose ("...the Why: is below") doesn't satisfy it, and the FULL
 # "How to apply" label is still required — a bare "How:" drops the deliberate
 # "what do I concretely do next" cue and stays an ISSUE. See SKILL.md §1/§2.
-_LABEL = r"^[ \t#>*\-]*\*{0,2}\s*"
-_WHY_RE = re.compile(_LABEL + r"Why\s*\*{0,2}\s*[:：]", re.I | re.M)
-_HOW_RE = re.compile(_LABEL + r"How\s+to\s+apply\s*\*{0,2}\s*[:：]", re.I | re.M)
+_LABEL = r"^[ \t#>*\-]*\*{0,2}[ \t]*"
+_WHY_RE = re.compile(_LABEL + r"Why[ \t]*\*{0,2}[ \t]*[:：]", re.I | re.M)
+_HOW_RE = re.compile(_LABEL + r"How[ \t]+to[ \t]+apply[ \t]*\*{0,2}[ \t]*[:：]", re.I | re.M)
 # Near-miss detectors: only to enrich the error message (guide the fix) when the
 # strict label above is absent — a 'Why'/'How' line that looks like a label attempt.
 _WHY_NEAR = re.compile(_LABEL + r"Why\b", re.I | re.M)
@@ -83,7 +85,95 @@ _HOW_NEAR = re.compile(_LABEL + r"How\b", re.I | re.M)
 # Index pointer target `](path.md)`: lazy + a real terminator after `.md` so a backup
 # like `note.md.bak` isn't truncated to `note.md`; control chars (incl. NUL) excluded so
 # a malformed pointer can't reach realpath and throw. `<?` tolerates an angle-bracket link.
-_PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.md)(?=[)>\s#?]|$)")
+_PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.(?i:md))(?=[)>\s#?]|$)")
+_INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)")
+
+
+def _active_markdown(text, keep_inline=False):
+    """Jason's flat Markdown subset: omit comments and fenced/indented examples.
+
+    Keep line boundaries so removing inactive text cannot manufacture a link or
+    label. This is deliberately not a general CommonMark renderer.
+    """
+    output = []
+    comment = False
+    fence = None
+    for line in text.splitlines(keepends=True):
+        if fence:
+            if re.match(r"^ {0,3}" + re.escape(fence[0]) +
+                        "{" + str(fence[1]) + r",}[ \t]*\r?\n?$", line):
+                fence = None
+            output.append("\n")
+            continue
+        opening = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line.rstrip("\r\n"))
+        if not comment and opening and not (opening[1][0] == "`" and "`" in opening[2]):
+            fence = (opening[1][0], len(opening[1]))
+            output.append("\n")
+            continue
+        # Process comments before opening fences, but never interpret comment
+        # delimiters inside a fenced example.
+        parts = []
+        pos = 0
+        while pos < len(line):
+            if comment:
+                end = line.find("-->", pos)
+                if end < 0:
+                    break
+                comment = False
+                pos = end + 3
+            else:
+                start = line.find("<!--", pos)
+                code = _INLINE_CODE_RE.search(line, pos)
+                if code and (start < 0 or code.start() < start):
+                    parts.append(line[pos:code.end()])
+                    pos = code.end()
+                    continue
+                if start < 0:
+                    parts.append(line[pos:])
+                    break
+                parts.append(line[pos:start])
+                parts.append(" ")
+                comment = True
+                pos = start + 4
+        visible = "".join(parts)
+        opening = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", visible.rstrip("\r\n"))
+        if opening and not (opening[1][0] == "`" and "`" in opening[2]):
+            fence = (opening[1][0], len(opening[1]))
+            output.append("\n")
+            continue
+        if visible.startswith(("    ", "\t")):
+            output.append("\n")
+            continue
+        if not keep_inline:
+            visible = _INLINE_CODE_RE.sub(" ", visible)
+        output.append(visible.rstrip("\r\n") + "\n")
+    return "".join(output)
+
+
+def _index_targets(text):
+    # Only active flat bullet entries are index pointers. A prose example,
+    # comment, code span or fenced block does not activate a note.
+    active = _active_markdown(text)
+    return [target for line in active.splitlines()
+            if re.match(r"^ {0,3}[-+*][ \t]+", line)
+            for target in _PTR_RE.findall(line)]
+
+
+def _label_has_content(body, pattern):
+    # Content may start on the label line or a following line, but it cannot
+    # borrow the next label/heading as its own explanation. Inline commands count.
+    labels = sorted([*_WHY_RE.finditer(body), *_HOW_RE.finditer(body)],
+                    key=lambda match: match.start())
+    for match in pattern.finditer(body):
+        end = next((other.start() for other in labels
+                    if other.start() > match.start()), len(body))
+        section = body[match.end():end]
+        heading = re.search(r"\n {0,3}#{1,6}[ \t]+", section)
+        if heading:
+            section = section[:heading.start()]
+        if re.search(r"[^\W_]", section, re.UNICODE):
+            return True
+    return False
 
 
 def _short(value, limit=60):
@@ -109,8 +199,7 @@ def _valid_date(s):
 
 
 def _envint(name, default):
-    # Bad/empty or non-positive (0 / negative) cap -> fall back to the default,
-    # matching the hook so the two layers agree.
+    # An absent, invalid or non-positive optional budget uses the default.
     raw = os.environ.get(name)
     if raw is None:
         return default
@@ -140,6 +229,7 @@ def _kb(n):
 # and reading it in bulk (doctor opens EVERY note) is how one planted file takes
 # the whole validator down.
 NOTE_READ_CAP = 4 * 1024 * 1024
+INDEX_READ_CAP = 1024 * 1024
 
 
 def _read_bytes(p, cap=None):
@@ -151,7 +241,8 @@ def _read_bytes(p, cap=None):
         if cap is not None and os.path.getsize(p) > cap:
             return _TOO_LARGE
         with open(p, "rb") as fh:
-            return fh.read()
+            raw = fh.read(cap + 1) if cap is not None else fh.read()
+            return _TOO_LARGE if cap is not None and len(raw) > cap else raw
     except OSError:
         return None
     except (MemoryError, OverflowError):
@@ -222,7 +313,7 @@ def _contained(real, root_abs):
 def _within(path, root_abs):
     # True if `path`, with all symlinks resolved, is the store root or lies inside it.
     # Keeps a symlinked note / index / pointer from resolving outside the store — the
-    # store is attacker-influenceable input (SECURITY.md), so a planted symlink must not
+    # store is attacker-influenceable input (README.md, safety section), so a planted symlink must not
     # become a read primitive. root_abs must already be an os.path.realpath.
     return _contained(os.path.realpath(path), root_abs)
 
@@ -360,32 +451,21 @@ def main(argv):
     # The index is read first and unconditionally, and its pointer targets are echoed in
     # the report — so a MEMORY.md that is itself a symlink escaping the store root must be
     # refused, not read (else an arbitrary file is parsed as the index and fragments of it
-    # leak out). Same boundary as the note/pointer escape checks (SECURITY.md).
+    # leak out). Same boundary as the note/pointer escape checks (README.md).
     if not _within(idx_path, root_abs):
         print(f"jason-doctor: index at {idx_path} resolves outside the store root "
               f"(symlink escape) — refusing to read")
         return 1
 
-    hard = _envint("JASON_HARD", 200)
-    hard_b = _envint("JASON_HARD_BYTES", 25600)
-    # Refuse to slurp a runaway index. A sync client or a broken writer can leave
-    # a multi-gigabyte MEMORY.md here; reading it would hang or raise MemoryError
-    # instead of reporting the over-cap state this tool exists to report. Well
-    # past the cap the verdict needs no content, so say it and stop.
-    parse_cap = max(hard_b * 8, 1 << 20)
-    try:
-        isize = os.path.getsize(idx_path)
-    except OSError:
-        isize = None
-    if isize is not None and isize > parse_cap:
-        print(f"ISSUE: index is {_kb(isize)} — far past the cap "
-              f"({hard} lines / {_kb(hard_b)}) and too large to parse. Compact or "
-              f"restore it before running further checks.")
-        print(f"jason-doctor: 1 issue(s) — 1 over-cap")
-        print(f"  fix over-cap: compact MEMORY.md — pointer-ify long lines, merge, "
-              f"archive cold notes")
+    hard = _envint("JASON_HARD", 0)
+    hard_b = _envint("JASON_HARD_BYTES", 0)
+    # Separate bounded diagnostic reads from optional user-selected budgets.
+    iraw = _read_bytes(idx_path, cap=INDEX_READ_CAP)
+    if iraw is _TOO_LARGE:
+        print("ISSUE: index exceeds the doctor parser safety limit (1 MiB); "
+              "consistency was not checked. Split or compact it before retrying. "
+              "This is a diagnostic limit, not a host load limit.")
         return 1
-    iraw = _read_bytes(idx_path)
     if iraw is None:
         print(f"jason-doctor: cannot read index at {idx_path}")
         return 1
@@ -393,17 +473,17 @@ def main(argv):
     issues, info = [], []
 
     # Byte size from the raw on-disk bytes (NOT the lossily re-decoded text), so
-    # the cap math agrees with the hook and jason_check on a non-UTF-8 index.
+    # byte accounting agrees with jason_check on a non-UTF-8 index.
     nbytes = len(iraw)
     nlines = _lines(itext)
-    if nlines > hard or nbytes > hard_b:
+    if (hard and nlines > hard) or (hard_b and nbytes > hard_b):
         over = []
-        if nlines > hard:
+        if hard and nlines > hard:
             over.append(f"{nlines} lines > {hard}")
-        if nbytes > hard_b:
+        if hard_b and nbytes > hard_b:
             over.append(f"{_kb(nbytes)} > {_kb(hard_b)}")
-        issues.append(f"index over cap ({' and '.join(over)}): {nlines} lines / "
-                      f"{_kb(nbytes)} (cap {hard} lines / {_kb(hard_b)}) — compact it")
+        issues.append(f"index over configured budget ({' and '.join(over)}): "
+                      f"{nlines} lines / {_kb(nbytes)} — review and compact it")
 
     # note files (by basename; a store uses unique slugs), excluding the top-level
     # templates/ & archive/ dirs only. Match on the FIRST path component, not a raw
@@ -426,7 +506,7 @@ def main(argv):
             # followed and read: doctor would otherwise open an arbitrary file and could
             # echo a fragment of it (a malformed-frontmatter line) into the report. Same
             # boundary the index-pointer escape check enforces — the store is attacker-
-            # influenceable input (SECURITY.md), so a planted symlink can't be a read
+            # influenceable input (README.md), so a planted symlink can't be a read
             # primitive. Flag it and skip (don't add to `notes`, don't read).
             if not _within(full, root_abs):
                 issues.append(f"note file '{f}' resolves outside the store root "
@@ -449,13 +529,16 @@ def main(argv):
                               f"{notes[f]} and {full} — slugs must be unique")
             notes[f] = full
 
-    referenced, indexed = set(), set()
+    indexed = set()
+    graph = {base: set() for base in notes}
+    targets = _index_targets(itext)
+    ptr_counts = {}
     # every index (file.md) pointer must resolve to a real file AT THE POINTED PATH.
     # Match the link target up to whitespace / '#' / ')' (so anchored `(note.md#sec)`
     # and titled `(note.md "Title")` links resolve), skip external URLs ending in
     # .md, and resolve the path itself — a bare basename match is too loose (it would
     # green-light `wrong/path/a.md` whenever some `a.md` exists elsewhere in the store).
-    for tgt in sorted(set(_PTR_RE.findall(itext))):
+    for tgt in targets:
         if _is_remote_url(tgt):
             continue  # genuinely external (http/https/…), not a local note pointer
         if "://" in tgt:
@@ -491,28 +574,14 @@ def main(argv):
             # (macOS/Windows) doesn't yield a false 'orphan'. See _real_basename — realpath
             # canonicalises case on Windows but NOT on macOS, so we fold explicitly.
             base = _real_basename(full, notes)
-            referenced.add(base)
             indexed.add(base)
+            ptr_counts[base] = ptr_counts.get(base, 0) + 1
         else:
             issues.append(f"index points to a missing file: {tgt}")
 
     # duplicate index pointers: the same note pointed to from more than one index line
     # is redundant (INFO — a thematic index may cross-reference on purpose, so it does
     # not fail). Count the raw (non-deduped) targets that resolved to a real note.
-    ptr_counts = {}
-    for tgt in _PTR_RE.findall(itext):
-        if "://" in tgt:
-            # Broader than the containment loop's _is_remote_url on purpose: this
-            # only tallies duplicate LOCAL pointers, and a non-remote scheme has
-            # already been reported as an issue there — it is not a valid pointer
-            # to count here.
-            continue
-        full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
-        if _excluded_dir(full, root_abs):
-            continue  # not in the note graph (see the containment loop) — nothing to tally
-        b = _real_basename(full, notes) if os.path.isfile(full) else os.path.basename(full)
-        if b in indexed:
-            ptr_counts[b] = ptr_counts.get(b, 0) + 1
     for b, n in sorted(ptr_counts.items()):
         if n > 1:
             info.append(f"index points to '{b}' {n} times (one pointer per note is the norm)")
@@ -530,7 +599,8 @@ def main(argv):
         if text is None:
             issues.append(f"cannot read note file: {p}")
             continue
-        for w in re.findall(r"\[\[([^\]]+)\]\]", text):
+        fm, fm_problems, body = _frontmatter(text)
+        for w in re.findall(r"\[\[([^\]]+)\]\]", _active_markdown(body)):
             # Jason wikilinks are bare slugs. Tolerate an Obsidian-style display alias
             # (`[[slug|Alias]]`) and a section anchor (`[[slug#Heading]]`) by resolving on
             # the slug part only, so those aren't misread as broken links. A target that
@@ -552,14 +622,13 @@ def main(argv):
                 info.append(f"[[{w}]] in {base} has no target file yet (ok if a forward-ref stub)")
             elif hit != base:
                 # (a note linking to itself isn't "referenced by another note")
-                referenced.add(hit)
+                graph[base].add(hit)
 
         if not schema:
             continue  # --no-schema: structural checks only, skip frontmatter validation
         # --- protocol schema: the spec's MUST fields are ISSUE (exit 1); soft
         # hygiene (name<->filename) is info. See SKILL.md §1/§2. ---
         slug = base[:-3]  # strip .md
-        fm, fm_problems, body = _frontmatter(text)
         for prob in fm_problems:
             issues.append(f"{base}: {prob}")
         if fm is None and not fm_problems:
@@ -595,23 +664,37 @@ def main(argv):
             if t in ("feedback", "project"):
                 # scan the BODY only — a Why:/How to apply: line in the frontmatter
                 # doesn't count as the required reflection.
+                body = _active_markdown(body, keep_inline=True)
                 if not _WHY_RE.search(body):
                     msg = f"{base}: type {t} must carry a 'Why:' line"
                     if _WHY_NEAR.search(body):
                         msg += " (found a 'Why' label without the 'Why:' form — add a colon, e.g. **Why:**)"
                     issues.append(msg)
+                elif not _label_has_content(body, _WHY_RE):
+                    issues.append(f"{base}: 'Why:' line must have non-empty explanatory content")
                 if not _HOW_RE.search(body):
                     msg = f"{base}: type {t} must carry a 'How to apply:' line"
                     if _HOW_NEAR.search(body):
                         msg += " (found 'How' but not the full 'How to apply:' label, e.g. **How to apply:**)"
                     issues.append(msg)
+                elif not _label_has_content(body, _HOW_RE):
+                    issues.append(f"{base}: 'How to apply:' line must have non-empty explanatory content")
 
-    # orphans (ISSUE) and in-graph-but-not-in-index notes (INFO: won't load at start)
+    # Reachability, not incoming degree: isolated cycles have references but no
+    # recall entry point. Traverse only from validated active index pointers.
+    reachable = set(indexed)
+    pending = list(indexed)
+    while pending:
+        for target in graph.get(pending.pop(), ()):
+            if target not in reachable:
+                reachable.add(target)
+                pending.append(target)
+
     for base in sorted(notes):
         if base == "MEMORY.md":
             continue
-        if base not in referenced:
-            issues.append(f"orphan note (not in index, nothing links to it): {base}")
+        if base not in reachable:
+            issues.append(f"orphan note (unreachable from MEMORY.md): {base}")
         elif base not in indexed:
             info.append(f"{base}: linked from another note but not in MEMORY.md "
                         f"(won't load at session start — add an index pointer)")
@@ -640,7 +723,7 @@ def main(argv):
                 b = "orphan"
             elif "duplicate note slug" in s:
                 b = "duplicate-slug"
-            elif "index over cap" in s:
+            elif "index over configured budget" in s:
                 b = "over-cap"
             else:
                 b = "other"
@@ -652,7 +735,7 @@ def main(argv):
             "escaped-note": "remove the symlink note (or point it at a file inside the store) — it was not read",
             "broken-pointer": "repair or remove the MEMORY.md pointer (needs a human)",
             "duplicate-slug": "rename one of the clashing note files so each slug is unique",
-            "orphan": "link it from the index or another note, or move it under archive/",
+            "orphan": "link it from the index or an index-reachable note, or move it under archive/",
             "missing-date": "add 'created:'/'updated:' (YYYY-MM-DD) to each note's frontmatter",
             "missing-why-how": "add a 'Why:' / 'How to apply:' line to the note (SKILL.md §2)",
             "other": "see the ISSUE lines above",

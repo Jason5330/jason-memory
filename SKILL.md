@@ -35,21 +35,25 @@ and resumable project state. Do not create a second "handoff" memory type or a
 parallel handoff store: unfinished-task continuity belongs in a `project` note
 and follows the same index, dedup, correction, and retirement rules.
 
-- Default: a `memory/` directory the user configures (e.g. inside their notes
-  folder, or a `memory/` folder at the root of the active project).
+- Default: `.jason-memory/` at the root of the active project. Use one
+  project-local store; do not read or write an external memory directory unless
+  the user explicitly chooses it. Content defaults to Traditional Chinese;
+  field names, type values and Why/How labels remain English.
 - It MUST be configurable; never hard-code an absolute path in the skill.
 - If `<MEMORY_ROOT>` lives inside a git repository, it MUST be git-ignored —
   memories routinely contain machine-local, sensitive but non-credential detail
   (server IPs, ssh paths, serial numbers). Confirm `.gitignore` covers it before
   writing there. (Credential *values* never belong in memory at all — see §5.)
-- On a host whose native memory is a **plain directory of files you control**
-  (e.g. Claude Code), `<MEMORY_ROOT>` may be that directory, and Jason layers
-  its conventions on top. But if the host **manages** its own memory — writing,
-  rewriting, or freezing files through its own manager (Codex's native Memories,
-  OpenClaw's auto-written memory, Hermes's managed files) — point Jason at a
-  **separate folder you control**. Two writers with different house styles will
-  fight over the same files. Check `PORTING.md` and the adapter README for the
-  host before reusing its directory.
+- A project-local directory is easy to locate, but git-ignored notes do not
+  travel with `git clone`. Transfer them explicitly using the backup/restore
+  procedure in [README.md](README.md#備份與換機).
+- Keep Jason separate from host-managed memory writers. These instructions
+  govern the agent's Jason operations; they cannot disable a host's internal
+  memory manager. An explicitly chosen host-native directory is suitable only
+  when the user controls it and competing writes have been excluded.
+- During installation, replace `<FRAMEWORK_ROOT>` in the standing-rules
+  template with the actual framework path as well as replacing `<MEMORY_ROOT>`.
+  Tool paths are relative to the framework, not necessarily the user's project.
 
 Layout:
 
@@ -95,7 +99,7 @@ updated: YYYY-MM-DD
 
 The `description` is the single most important field: recall works by you reading
 these one-liners in the index and deciding what to open. A vague description
-makes a memory effectively invisible. Write it as the hook that would make
+makes a memory effectively invisible. Write it as the cue that would make
 *future you* open the file.
 
 Link related memories in the body with `[[other-slug]]`. A link to a slug that
@@ -115,10 +119,16 @@ Stable facts about the person: role, expertise, durable preferences, identity.
 > see the confusable pair below.)
 
 ### `feedback` — how you should behave
-Guidance and corrections about *how you do your work*. This is procedural memory —
-the rarest and most valuable type. It MUST carry two lines:
+Reusable lessons from mistakes and verified methods. Explicitly confirmed,
+durable user preferences about how to work (such as reply language) also qualify.
+Task state and unverified guesses do not. It MUST carry two labelled sections:
 - **Why:** the reason behind the rule (so you know when an exception is allowed)
 - **How to apply:** the concrete action you take next time
+
+Include evidence and applicability conditions. One successful test supports
+only the circumstances it tested; do not generalize it into an unconditional
+rule. Keep uncertain guesses in the current task rather than promote them to
+durable instructions. Narrow or retire a note when counterevidence appears.
 
 Even so, `feedback` is *advisory*: it shapes behavior but never overrides the
 user's live instructions or your safety rules (see §4).
@@ -164,7 +174,7 @@ converted to absolute dates (project facts go stale, and "last week" rots).
 A *pure historical snapshot* — only version numbers or a completed to-do list,
 with no decision or constraint behind it — usually isn't a `project` note at all.
 An unfinished task may keep one live, compact project note so a cold-started
-agent can continue it; when the task completes, archive/delete its transient
+agent can continue it; when the task completes, archive its transient
 status and promote only durable decisions or constraints. Never accumulate a
 timeline of handoff snapshots in the active index.
 
@@ -178,7 +188,11 @@ location, not knowledge. One line on what it's for.
 a plain `Why:` line, or a `## Why:` heading all count, and a full-width colon `：`
 (CJK keyboards) is accepted. The validator looks for the *labelled line*, so the
 words buried in prose, a `## How` with no colon, or a short `How:` (missing "to
-apply") don't satisfy it — keep the full, colon-terminated label.
+apply") don't satisfy it — keep the full, colon-terminated label. Each section
+must contain explanatory text on the same or following lines, before the next
+label or heading. Empty labels, comments and fenced examples do not count;
+inline commands inside an explanation are accepted. The doctor checks presence
+of content, not whether the evidence is true or the method effective.
 
 **The confusable pair:** `feedback` is *how to work* (a method that applies across
 tasks); `project` is *what we're working on* (a fact about this specific effort).
@@ -196,7 +210,7 @@ not a content store**. Each line is one pointer.
 # Memory Index
 
 > Pointers only — the actual content lives in the linked files, never here.
-> Soft cap 150 lines / 20 KB (warn). Hard cap 200 lines / 25 KB (compact first).
+> No fixed size budget by default. Keep entries concise and read the full index.
 
 ## user
 - [Founder & lead engineer](founder-profile.md) — who the user is
@@ -213,14 +227,24 @@ not a content store**. Each line is one pointer.
 
 If a line starts carrying real content (sentences, explanations, status dumps),
 that content has leaked out of its detail file — move it back. The index line is
-always "one short hook + link".
+always "one short summary + link".
+
+**Active syntax.** Use a flat `- [Title](slug.md) — summary` entry (the `+` and
+`*` bullet markers also work). Targets may use `.md` in any letter case; actual
+filename case follows the filesystem. Anchors, angle brackets and quoted link
+titles are accepted; filenames should be slugs without spaces. HTML comments,
+fenced/indented code and inline code are examples, not active pointers. Reference
+links, nested lists and other Markdown extensions are outside this restricted
+index syntax. Wikilink edges are read from active note bodies, not frontmatter
+or code examples. The doctor checks reachability from the active index, so an
+isolated cycle of notes is an issue even when its members reference each other.
 
 ---
 
 ## 4. Recall protocol (reading)
 
 1. At the start of a task, read `MEMORY.md`.
-2. Scan the one-line descriptions. Open only the detail files whose hooks look
+2. Scan the one-line descriptions. Open only the detail files whose summaries look
    relevant to the task at hand. If continuing unfinished work, open the matching
    live `project` note. Do not bulk-read everything.
    **Open only what resolves inside `<MEMORY_ROOT>`.** An index line is just
@@ -269,7 +293,7 @@ session. Before writing, run the checks in this order:
      *value* is never. Record only where a secret lives (e.g. "API key is in the
      password manager / env var FOO"), never the secret itself. Minimize partial
      PII (a phone number, email, address) — prefer a pointer. This is unenforced
-     discipline (no hook scans content — see §8), so treat it as best-effort and
+     discipline (no content scanner — see §8), so treat it as best-effort and
      be deliberate.
    If the user asks you to remember something already covered by the above, ask
    what was *non-obvious* about it and save that instead.
@@ -283,11 +307,20 @@ session. Before writing, run the checks in this order:
    for project), and link related memories with `[[...]]`.
 
 4. **Update the index.** Add one pointer line under the right type heading. Then
-   run the index-size guard in §6.
+   run the post-write checks in §6.
 
-5. **Delete when wrong.** If a memory turns out to be false or obsolete, delete
-   the file (or move it to `archive/`) and remove its index line. Forgetting is a
-   first-class operation — a store full of stale facts is worse than a small one.
+5. **Retire when wrong.** If a memory turns out to be false or obsolete, move
+   it to `archive/`, remove its active pointer and record any replacement in a
+   discoverable archive index (§6). Permanently delete only as directed by the
+   user. Forgetting from active recall should preserve a recovery path.
+
+**Recovery discipline.** Before reorganizing or replacing existing notes, retain
+a local recoverable copy outside the active note graph. Validate the new note
+before updating its index pointer, then run both checkers. If interrupted, inspect
+the files and repair the index from the retained copy. This release has no
+transactional writer, journal, or multi-file atomic commit: two direct file writes
+are not a transaction, even with a single writer. Back up the store before bulk
+changes; the README describes explicit backup and transfer.
 
 ### Unified continuity sync
 
@@ -302,7 +335,7 @@ unfinished work when practical — sync the canonical store in this order:
 4. **Feedback:** promote only reusable corrections or workflows, never task-local
    state.
 5. **Reference:** save only durable external locations.
-6. **Retire:** archive/delete stale notes and completed transient project state;
+6. **Retire:** archive stale notes and completed transient project state;
    remove their index pointers.
 7. **Validate:** run the index-size check and `jason_doctor.py`.
 8. **Cold-start test:** ask whether a new thread with only the repo plus this
@@ -313,41 +346,40 @@ After any memory write or sync, report exactly what was **added**, **updated**,
 check result. If transient state was deleted rather than retained, name it under
 `archived` as deleted. Report an empty category as `none`; do not silently write.
 
-This sync is a semantic curation pass. A lifecycle hook may remind, mark work
-dirty, or gate a manual compact, but it does not itself understand the
-conversation or guarantee that this sync happened.
+This sync is a semantic curation pass performed by the agent. The checkers do
+not summarize the conversation or guarantee that the sync happened.
 
 ---
 
-## 6. Bounded index guard (the anti-bloat rule)
+## 6. Post-write checks and index maintenance
 
-The index loads in full every session, so its size is a recurring cost — and many
-hosts only load the first ~200 lines / ~25 KB of it, meaning anything past that
-silently stops being recalled. Keep it bounded.
+Jason has no default line/byte budget and no write interceptor. After updating
+memory, run `tools/jason_check.py <MEMORY_ROOT>/MEMORY.md` to measure size and
+`tools/jason_doctor.py <MEMORY_ROOT>` to validate consistency. Resolve framework
+paths from the installation, not the consumer project's working directory.
 
-**Every time you are about to modify `MEMORY.md`, check BOTH its line count and
-its byte size.** An index can be well under the line cap yet over the byte cap
-because its lines are long (content leaked into the index). Whichever limit is hit
-first wins.
+Keep the index concise because reading it has a recurring context cost. At task
+start, read the entire configured index; if the tool truncates its output,
+continue in chunks before judging which notes are relevant. Exceeding 200 lines
+alone is not a Jason error. A native host's auto-loaded memory may have its own
+limits; see [README.md](README.md#索引整理與可選門檻) for the distinction.
 
-- **Over 150 lines or 20 KB:** proceed, but warn the user that the index is getting
-  long and suggest a compaction pass.
-- **A change that would push it past 200 lines or ~25 KB:** do NOT just append.
-  First run the compaction procedure below. If the **byte** cap is the one
-  exceeded, your lines are too long — pointer-ifying (step 1) is the biggest win.
-  Only if it still cannot get under the caps do you stop and ask the user which
-  memories to drop. **Never silently discard a fact you just learned because the
-  index is full** — compact first, ask second.
+Optional positive `JASON_WARN` / `JASON_WARN_BYTES` values enable size warnings
+in jason_check. `JASON_HARD` / `JASON_HARD_BYTES` enable budget issues in both
+checkers. Each dimension defaults to disabled; invalid or non-positive values
+also disable it. These only affect diagnostic results and never block writes.
+The doctor's separate 1 MiB index / 4 MiB note parsing bounds protect diagnostic
+resources; they are not a host load window. A skipped check is reported as an
+issue, not a clean result.
 
-On a Claude Code host, a `PreToolUse` hook is the hard backstop (see `hooks/`): it
-blocks edits that would *grow* the index past the caps, but always allows
-*shrinking* edits so you can compact incrementally (e.g. 210 → 205 → 198). It only
-injects nudges — it never auto-approves. The soft warnings and the compaction
-judgment are your job either way.
+Clean up when entries duplicate each other, go stale, have vague summaries, or
+reading becomes cumbersome. Do not discard useful memories just to meet an
+arbitrary line count. If a user has explicitly selected a budget and cleanup
+cannot meet it without losing useful context, explain the tradeoff.
 
 ### Compaction procedure (run in order, re-count after each step)
 1. **Pointer-ify.** Move any prose/content that has leaked into index lines back
-   into the detail files. The index line becomes "one hook + link". This usually
+   into the detail files. The index line becomes "one short summary + link". This usually
    recovers the most lines.
 2. **Merge duplicates.** Find pointers to overlapping facts; merge their detail
    files, fix the `[[links]]`, delete the redundant index line.
@@ -355,14 +387,20 @@ judgment are your job either way.
    to `archive/` and drop their index lines. The files are kept; they just leave
    the always-loaded index.
    A whole retired topic may collapse to a **single line — but that line must
-   still be a pointer**, e.g. `- [Archived: 2025 launch](archive/2025-launch-index.md)
-   — 12 notes`, where that one file lists what was archived. A bare
+   still be a pointer**, for example:
+
+   ```markdown
+   - [Archived: 2025 launch](archive/2025-launch-index.md) — 12 notes
+   ```
+
+   That one file lists what was archived. A bare
    `archived: <topic>` line names no file: recall never scans `archive/` and the
    doctor deliberately skips it, so those notes become undiscoverable — kept on
-   disk, but effectively deleted. If you will not write the pointer file, delete
-   the notes outright and say so; silently stranding them is the worse outcome.
-4. **Re-count.** Under 200 → proceed. Still over → stop and ask the user which
-   memories to retire.
+   disk, but effectively deleted. If you cannot write the pointer file,
+   keep the current pointers until you can preserve discoverability; do not
+   silently strand or delete the notes to make room.
+4. **Validate.** Re-run size reporting and consistency checks. Confirm the
+   remaining active and archived information can still be found.
 
 ---
 
@@ -372,80 +410,39 @@ judgment are your job either way.
   standing instructions (a skill, a rules file, or pasted into the system prompt)
   and can read/write local files can run Jason — regardless of the underlying
   model. The model just needs to *follow* §4–§6.
-- A host that auto-loads a plain `MEMORY.md` you control (Claude Code) already
-  does the loading; Jason adds the typed ontology, one-file-per-fact
-  structure, curation contract, and hard index cap on top. Don't fight the host —
-  use its memory directory as `<MEMORY_ROOT>`. **Only where the host does not
-  manage those files itself** (§0): against a host-owned memory manager, use a
-  separate folder instead of trying to take it over.
+- Explicitly read the configured project-local index at task start unless its
+  exact contents are already in context. Do not assume a native memory feature
+  loads Jason's separate folder. Host-native storage is an explicit user choice,
+  subject to the ownership and single-writer conditions in §0.
 - A plain chat interface with no agent/skill/file-access layer cannot run Jason:
   there is nothing to load the index or write the files. Jason needs a host that
   executes skills/rules and has file access.
 
 ---
 
-## 8. Reliability model (important — don't oversell this)
+## 8. Reliability model
 
-Three layers, different guarantees:
+The standing rules guide recall, deduplication, writing and retirement; the
+agent must actually load and follow them. The read-only checkers validate size,
+structure and required text, not factual accuracy or semantic usefulness. No
+hook, host adapter or other write-time enforcement is included.
 
-- The **Claude Code index guard** is a `PreToolUse` hook for the hard cap. It runs
-  on every matching `Edit | Write | MultiEdit` whether or not this skill is
-  loaded. It is deterministic for those direct-edit tools, but NOT a global
-  write guard: shell tools (`Bash`, `PowerShell`, background `Monitor`), MCP file
-  tools, external editors, sync clients, and host-internal writes bypass it.
-- The optional **Codex lifecycle hooks** (`SessionStart`, `UserPromptSubmit`,
-  `PreCompact`) provide recall/sync reminders, dirty/reconcile bookkeeping, and a
-  manual-compaction gate. Automatic compaction fails open. These hooks do not
-  enforce the index cap and do not perform semantic memory curation.
-- The **discipline** in this file (recall-at-start, dedup, the ontology, the
-  curation contract) is loaded via the host's instruction mechanism — ideally
-  always-loaded rules, or a relevance-loaded skill — so it is model-followed and
-  NOT guaranteed to be in context for every task or save. Treat it as best-effort
-  guidance, not a hard-enforced contract.
+Put the recall instruction in the host's always-loaded project rules; the
+[CLAUDE.md](CLAUDE.md) template supplies it. Do not assume native memory features
+load Jason's independent project folder or perform the curation pass.
 
-Neither hook family can decide what belongs in `project` versus `feedback`, or
-honestly claim that an automatic compact produced a complete semantic summary.
+Jason assumes a single writer with serialized writes. There is no lock or
+multi-file transaction; concurrent edits can lose updates. Back up before bulk
+changes and check consistency after an interrupted write.
 
-For behaviour you want truly always-on (e.g. "always check memory at the start of
-a task"), put a one-line pointer in your host's always-loaded rules — Claude Code:
-`CLAUDE.md` or `~/.claude/CLAUDE.md`. A ready-to-use file is `CLAUDE.md` in this repo.
+## 9. Installation and upgrades
 
-This is why Jason is **0.x / experimental**: the hard cap is deterministic only
-for the matched direct-edit tools (not a global write guard), and the discipline is
-only as reliable as your host loading the rules plus the model following them.
+Follow [README.md](README.md#安裝) to create the project store and install the
+standing rules. Python 3.9+ is needed for the two checkers. No host event
+registration is required.
 
-**Concurrency.** Jason assumes a **single writer / serialized writes**. The hook
-reads the index, predicts, then decides — there is no locking, so two agents
-updating the same index concurrently can lose updates or race the check-then-write.
-Run one writer at a time per store.
-
----
-
-## 9. Portability & degradation (other hosts)
-
-Jason is a *discipline*, not a storage engine — it rides on whatever memory
-store and instruction mechanism your host already has. Full per-host setup is in
-**PORTING.md**. The size cap degrades gracefully when a host has no PreToolUse
-hook; use the strongest rung the host supports:
-
-1. **Pre-write deny hook** — `hooks/jason_index_guard.py` enforces the cap on
-   every matching edit (deterministic for those tools). Written and tested for Claude
-   Code only. Some other hosts expose a pre-write deny too (Hermes's `pre_tool_call` —
-   though it has a reported non-firing bug in some worker contexts, issue #25204; Cursor,
-   though its hook is newer and less proven), so the cap is portable with a per-host I/O
-   shim you write and verify yourself — but OpenClaw can only block via a `before_tool_call`
-   plugin (not this Python hook), and Trae has none. See **PORTING.md** for the
-   per-host picture.
-2. **Any host with a shell** (Hermes, Cursor, Cline, Codex, OpenClaw, …) — after writing the
-   index, run `python tools/jason_check.py <MEMORY.md>` and compact if it
-   prints `OVER`. Best-effort: the agent must remember to run it.
-3. **Model discipline** — §6: count lines/bytes before writing the index.
-4. **Backstop** — run `python tools/jason_doctor.py <MEMORY_ROOT>` periodically
-   to catch an over-cap index, broken index pointers, and orphan notes.
-
-Honest limit: a *deterministic* guarantee is shipped and tested only for Claude Code
-(the adapter in this repo); other hosts expose the hook API so the cap is portable,
-but you build and verify that shim yourself. If a host
-writes its memory internally (e.g. Letta, or Codex's managed local Memories) — not
-via a tool an agent step or hook can see — even the step-2 check can't intercept it;
-there the cap is pure discipline.
+When upgrading a previous installation, follow
+[the migration instructions](README.md#從舊版升級): remove only the old Jason index
+interceptor registration, preserve unrelated settings, update the standing
+rules and clear old budget environment variables if no budget is desired.
+Existing Markdown notes and frontmatter remain usable.
