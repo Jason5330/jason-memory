@@ -254,6 +254,7 @@ class _TooLarge(object):
 
 
 _TOO_LARGE = _TooLarge()
+_INVALID_UTF8 = object()
 
 
 def _read(p):
@@ -263,7 +264,10 @@ def _read(p):
     # write UTF-8-BOM by default, so adopter notes routinely carry one.
     if raw is None or raw is _TOO_LARGE:
         return raw
-    return raw.decode("utf-8-sig", "replace")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return _INVALID_UTF8
 
 
 def _is_remote_url(target):
@@ -469,11 +473,15 @@ def main(argv):
     if iraw is None:
         print(f"jason-doctor: cannot read index at {idx_path}")
         return 1
-    itext = iraw.decode("utf-8-sig", "replace")  # strip a leading BOM if present
+    try:
+        itext = iraw.decode("utf-8-sig")  # strip a leading BOM if present
+    except UnicodeDecodeError:
+        print("ISSUE: index is not valid UTF-8; consistency was not checked. "
+              "Restore or convert the source file without discarding content.")
+        return 1
     issues, info = [], []
 
-    # Byte size from the raw on-disk bytes (NOT the lossily re-decoded text), so
-    # byte accounting agrees with jason_check on a non-UTF-8 index.
+    # Byte size from raw on-disk bytes, including any BOM, agrees with jason_check.
     nbytes = len(iraw)
     nlines = _lines(itext)
     if (hard and nlines > hard) or (hard_b and nbytes > hard_b):
@@ -491,13 +499,20 @@ def main(argv):
     # nested "sub/templates/" is not wrongly skipped.
     notes = {}
     seen_ci = {}  # lower-cased slug -> first on-disk name, to catch case-only collisions
-    for dp, _, fs in os.walk(root):
+    def scan_error(exc):
+        issues.append(f"cannot scan directory: {exc.filename!r}; "
+                      "consistency check is incomplete")
+
+    for dp, dirs, fs in os.walk(root, onerror=scan_error):
         rel = os.path.relpath(dp, root).replace("\\", "/")
         parts = rel.split("/")
         # `.lower()` to stay in lockstep with _excluded_dir — see the note there on why
         # folding only one side reintroduces a hidden orphan (or invents a false one).
         if parts and parts[0].lower() in _EXCLUDED_DIRS:
+            dirs[:] = []
             continue
+        if rel == '.':
+            dirs[:] = [d for d in dirs if d.lower() not in _EXCLUDED_DIRS]
         for f in fs:
             if not f.lower().endswith(".md"):  # tolerate .MD/.Md so they aren't skipped (and bypass schema) on case-insensitive FS
                 continue
@@ -598,6 +613,10 @@ def main(argv):
             continue
         if text is None:
             issues.append(f"cannot read note file: {p}")
+            continue
+        if text is _INVALID_UTF8:
+            issues.append(f"note file is not valid UTF-8: {base}; "
+                          "content was not validated")
             continue
         fm, fm_problems, body = _frontmatter(text)
         for w in re.findall(r"\[\[([^\]]+)\]\]", _active_markdown(body)):

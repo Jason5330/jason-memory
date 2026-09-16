@@ -1,6 +1,6 @@
 ---
 name: verify-before-done
-description: 回報完成前要先 grep 確認改動真的生效
+description: 回報完成前確認改動已生效並驗證相關行為
 type: feedback
 created: 2026-06-13
 updated: 2026-06-13
@@ -11,7 +11,7 @@ updated: 2026-06-13
 **Why:** 使用者之前被「回報完成，但改動其實默默失敗沒套用」坑過，沒驗證過就說
 「完成了」會讓使用者失去信任。
 
-**How to apply:** 每次編輯之後，grep 改動的符號/字串，把對到的那幾行貼在回報裡；
-或是跑相關測試，把結果貼出來。
+**How to apply:** 修改檔案後確認預期內容已生效；行為有改動時執行相關測試。
+對使用者簡短說明實際結果即可，不必貼出每次搜尋輸出，也不延伸成 Git 提交提醒。
 
 相關：[[code-change-hygiene]]

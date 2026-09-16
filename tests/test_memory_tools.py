@@ -188,7 +188,7 @@ class StoreTest(unittest.TestCase):
 
     def test_published_document_links_resolve(self):
         # Check published prose links, not paths in example memory snippets.
-        for name in ('README.md', 'SKILL.md', 'CLAUDE.md'):
+        for name in ('README.md', 'SKILL.md', 'CLAUDE.md', 'AGENTS.md'):
             text = doctor._active_markdown((ROOT / name).read_text(encoding='utf-8'))
             for target in re.findall(r'\]\(([^\s)]+)\)', text):
                 path = target.split('#', 1)[0]
@@ -199,14 +199,24 @@ class StoreTest(unittest.TestCase):
 
     def test_installed_rules_resolve_framework_outside_project(self):
         # Framework sources need not sit at the consumer project's root.
-        template = (ROOT / 'CLAUDE.md').read_text(encoding='utf-8')
+        template = (ROOT / 'templates/standing-rules.md').read_text(encoding='utf-8')
         installed = template.replace('<MEMORY_ROOT>', '.jason-memory').replace('<FRAMEWORK_ROOT>', ROOT.as_posix())
-        self.write('CLAUDE.md', installed)
+        for name in ('AGENTS.md', 'CLAUDE.md'):
+            self.write(name, installed)
         self.write('.jason-memory/MEMORY.md', (ROOT / 'templates/MEMORY.md').read_text(encoding='utf-8'))
         for target in re.findall(r'`([^`]+)`', installed):
             if target.endswith(('/SKILL.md', '/tools/jason_check.py', '/tools/jason_doctor.py', '/MEMORY.md')):
                 with self.subTest(target=target):
                     self.assertTrue((self.store / target).is_file(), target)
+        # Exercise the quoted commands exactly as installed, from a different
+        # consumer directory. Framework and memory paths need not share a root.
+        commands = re.findall(r'^python "([^"]+)" "([^"]+)"$', installed, re.M)
+        self.assertEqual(len(commands), 2)
+        for script, argument in commands:
+            with self.subTest(script=script):
+                result = subprocess.run([sys.executable, script, argument], cwd=self.store,
+                                        capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def measure(self, text):
         path = self.write('MEMORY.md', text)
@@ -271,6 +281,36 @@ class StoreTest(unittest.TestCase):
         path = self.write('growing.md', 'x' * 9)
         with patch.object(doctor.os.path, 'getsize', return_value=0):
             self.assertIs(doctor._read_bytes(path, cap=8), doctor._TOO_LARGE)
+
+    def test_unreadable_subtree_is_not_reported_clean(self):
+        # Permission bits are unreliable on Windows; reproduce os.walk's error
+        # callback contract without requiring administrative permissions.
+        def unreadable_walk(root, onerror=None):
+            yield str(self.store), ['private'], ['MEMORY.md']
+            if onerror:
+                onerror(PermissionError(13, 'Permission denied', str(self.store / 'private')))
+
+        with patch.object(doctor.os, 'walk', unreadable_walk):
+            code, out = self.diagnose('# Index\n')
+        self.assertEqual(code, 1)
+        self.assertIn('cannot scan directory', out)
+        self.assertNotIn('no broken pointers', out)
+
+    def test_invalid_utf8_is_not_reported_clean(self):
+        for target in ('MEMORY.md', 'a.md'):
+            for schema in (True, False):
+                with self.subTest(target=target, schema=schema):
+                    self.write('MEMORY.md', '- [A](a.md)\n')
+                    self.write('a.md', note('a'))
+                    path = self.store / target
+                    with path.open('ab') as stream:
+                        stream.write(b'\n\xff')
+                    output = io.StringIO()
+                    args = ['doctor', str(self.store)] + ([] if schema else ['--no-schema'])
+                    with contextlib.redirect_stdout(output):
+                        code = doctor.main(args)
+                    self.assertEqual(code, 1)
+                    self.assertIn('UTF-8', output.getvalue())
 
     def test_cli_entrypoints(self):
         self.write('MEMORY.md', '# Index\n' * 250)

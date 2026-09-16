@@ -3,11 +3,12 @@ name: jason
 description: >-
   Curated, file-based long-term memory for an AI agent. Use this skill (1) at the
   start of a task or when resuming unfinished work to recall via the memory index,
-  (2) during or after a task to save durable user, feedback, project, or reference
-  facts, and (3) before compacting, clearing context, or opening a fresh thread to
+  (2) when users express lasting requirements, preferences, corrections or project
+  constraints, or the agent learns a verified reusable lesson, without waiting
+  for a request to remember, and (3) before compacting or opening a fresh thread to
   sync the current goal, state, decisions, constraints, blockers, and next step.
-  Each memory is one small markdown file; a single always-loaded index (MEMORY.md)
-  lists them. Works on any agent host that can read and write local files.
+  Read the index explicitly; save small Markdown notes and notify the user after
+  each change. Uses local files, not Git monitoring or commit reminders.
 ---
 
 # Jason — curated file-based long-term memory
@@ -42,8 +43,10 @@ and follows the same index, dedup, correction, and retirement rules.
 - It MUST be configurable; never hard-code an absolute path in the skill.
 - If `<MEMORY_ROOT>` lives inside a git repository, it MUST be git-ignored —
   memories routinely contain machine-local, sensitive but non-credential detail
-  (server IPs, ssh paths, serial numbers). Confirm `.gitignore` covers it before
-  writing there. (Credential *values* never belong in memory at all — see §5.)
+  (server IPs, ssh paths, serial numbers). Establish this during installation;
+  recheck only if the store location or ignore configuration changes or there
+  is concrete evidence of accidental tracking. Do not turn this into a Git
+  status check on each task or write. (Credential values never belong in memory.)
 - A project-local directory is easy to locate, but git-ignored notes do not
   travel with `git clone`. Transfer them explicitly using the backup/restore
   procedure in [README.md](README.md#備份與換機).
@@ -119,8 +122,10 @@ Stable facts about the person: role, expertise, durable preferences, identity.
 > see the confusable pair below.)
 
 ### `feedback` — how you should behave
-Reusable lessons from mistakes and verified methods. Explicitly confirmed,
-durable user preferences about how to work (such as reply language) also qualify.
+Reusable lessons from mistakes and verified methods. Clearly expressed,
+durable user requirements and preferences about how to work also qualify.
+The user's own statement is evidence; no separate confirmation or explicit
+"remember this" is needed. Do not infer a lasting preference from a one-off request.
 Task state and unverified guesses do not. It MUST carry two labelled sections:
 - **Why:** the reason behind the rule (so you know when an exception is allowed)
 - **How to apply:** the concrete action you take next time
@@ -203,8 +208,9 @@ serializer test" = project.
 
 ## 3. The index: MEMORY.md
 
-`MEMORY.md` is loaded into context every session. It is a **table of contents,
-not a content store**. Each line is one pointer.
+Explicitly read `MEMORY.md` at task start; this standalone file is not guaranteed
+to be auto-loaded by the host. It is a **table of contents, not a content store**.
+Each line is one pointer.
 
 ```markdown
 # Memory Index
@@ -271,6 +277,46 @@ isolated cycle of notes is an issue even when its members reference each other.
 
 ## 5. Write protocol (saving)
 
+### When to assess memory
+
+Assess new information when the user states a requirement, preference, reminder,
+correction, goal or constraint; when you discover a reusable failure or verify a
+non-obvious solution yourself; and once before ending each turn. The final pass
+catches omissions, not a requirement to create a note every turn. Save a clear,
+useful fact at the next practical point in the current turn, not only at compaction.
+
+Use meaning, evidence and future usefulness rather than keywords:
+
+| Situation | Decision |
+|---|---|
+| "Keep the original data in future reports" | Save as `feedback`; the request itself confirms the preference. |
+| "This time, skip the chart" | Apply now; do not turn it into a lasting preference. |
+| "This project must work offline" | Save as `project` if not already documented. |
+| User corrects the scope of an existing preference | Update that note; the current instruction takes precedence. |
+| You diagnose a recurring failure without user intervention | Save verified failure conditions and prevention as `feedback`; label unknown causes as unknown. |
+| An untested workaround or guessed preference | Do not promote it to a durable rule; keep a necessary unresolved blocker in `project`. |
+| A duplicate, secret, or explicit "do not remember" | Skip; do not persist an opt-out fact in a different note. |
+
+For each candidate, decide **add / update / skip**: is it supported by the user's
+statement or observed evidence, useful in a future task or continuation, within
+the stated scope, and not excluded below? When yes, write without asking whether
+to remember it. When scope is unclear, retain only the explicit task constraint;
+ask only if resolving that uncertainty is necessary for the work. Do not invent
+personal traits or cross-project preferences.
+
+Record the source and applicability in the existing note body, without changing
+the frontmatter schema. For lessons, include the triggering condition, observed
+failure, verified prevention or fix, and verification limits under Why/How.
+One successful test does not establish a universal rule.
+
+"Remember to preserve formulas" is a behavioral reminder. "Remind me tomorrow
+at 3pm" requires a scheduler outside this framework. Store a relevant pending
+commitment in `project` with an absolute date and timezone, but never claim that
+a reminder has been scheduled without a successful scheduling result. A local
+note cannot wake the agent or deliver a timed notification.
+
+### Saving steps
+
 Save a memory when you learn something durable that will matter in a *future*
 session. Before writing, run the checks in this order:
 
@@ -285,6 +331,7 @@ session. Before writing, run the checks in this order:
      current test count — record where to read those, not the values (§2);
    - anything that only matters to the current conversation and will not be
      needed after a compact, clear, or new thread;
+   - information the user explicitly asked not to retain;
    - credentials or sensitive secrets of any kind — API keys, tokens, passwords,
      private keys, session cookies, recovery/backup codes, or full personal data.
      The store is plain-text, human-readable files: **never write a secret's
@@ -295,8 +342,9 @@ session. Before writing, run the checks in this order:
      PII (a phone number, email, address) — prefer a pointer. This is unenforced
      discipline (no content scanner — see §8), so treat it as best-effort and
      be deliberate.
-   If the user asks you to remember something already covered by the above, ask
-   what was *non-obvious* about it and save that instead.
+   If a requested fact is already documented, use its existing source rather
+   than duplicating it; briefly explain only when the user explicitly requested
+   a save. Do not turn exclusions into routine confirmation questions.
 
 2. **Dedup — does a memory already cover this?** Read the index; if an existing
    file covers the same ground, **update that file** (and bump `updated:`) rather
@@ -307,7 +355,7 @@ session. Before writing, run the checks in this order:
    for project), and link related memories with `[[...]]`.
 
 4. **Update the index.** Add one pointer line under the right type heading. Then
-   run the post-write checks in §6.
+   run the post-write checks in §6 and notify the user as described below.
 
 5. **Retire when wrong.** If a memory turns out to be false or obsolete, move
    it to `archive/`, remove its active pointer and record any replacement in a
@@ -341,10 +389,27 @@ unfinished work when practical — sync the canonical store in this order:
 8. **Cold-start test:** ask whether a new thread with only the repo plus this
    store could continue safely. If not, the sync is incomplete.
 
-After any memory write or sync, report exactly what was **added**, **updated**,
-**archived**, and **skipped** (with a reason), plus the index line/byte size and
-check result. If transient state was deleted rather than retained, name it under
-`archived` as deleted. Report an empty category as `none`; do not silently write.
+### Required notification after a change
+
+After saving or updating a note and its index, run both checkers and explicitly
+notify the user in the same turn. Notify archive or deletion changes too. Batch
+related changes into one concise notice; do not narrate every file operation.
+Include what changed, why it is worth remembering, its scope, a link to the note,
+and a compact check result with index lines/bytes. For example (illustrative):
+
+```markdown
+已主動記住：本專案的報表需保留原始資料。原因：後續報表都會用到這項要求。
+記憶：[報表要求](report-source-data.md)。健檢通過；索引 12 行／640 bytes。
+```
+
+Only report "remembered" after verifying the actual write and index entry. If a
+write or check fails, say what was saved, what failed, and what remains unresolved;
+do not claim success. An intended write is not a saved memory.
+
+When no memory changes, remain silent about the memory assessment: no empty
+added/updated/archived/skipped categories. Explain a skip only for an explicit
+save request or a material unresolved issue. Do not append Git status or offers
+to stage/commit to a memory or installation report.
 
 This sync is a semantic curation pass performed by the agent. The checkers do
 not summarize the conversation or guarantee that the sync happened.
@@ -418,6 +483,20 @@ cannot meet it without losing useful context, explain the tradeoff.
   there is nothing to load the index or write the files. Jason needs a host that
   executes skills/rules and has file access.
 
+### Git is not part of the memory loop
+
+Do not monitor repository status, enumerate untracked files, remind the user to
+stage/commit, or ask whether to push merely because a file or memory was created.
+Avoid messages such as "untracked, not yet git add/commit; let me know if needed."
+The one-time installation check of the memory directory's ignore rule does not
+authorize ongoing Git monitoring. Deduplication uses known sources and targeted
+reads, not a mandatory repository-wide Git scan.
+
+Use Git when the user requests version-control work (including upload/push), or
+when a particular command is necessary for the requested development/review task.
+Finish an already authorized commit/push without an extra offer or confirmation.
+Do not automatically commit every file as a substitute for stopping reminders.
+
 ---
 
 ## 8. Reliability model
@@ -428,7 +507,8 @@ structure and required text, not factual accuracy or semantic usefulness. No
 hook, host adapter or other write-time enforcement is included.
 
 Put the recall instruction in the host's always-loaded project rules; the
-[CLAUDE.md](CLAUDE.md) template supplies it. Do not assume native memory features
+[installation template](templates/standing-rules.md) supplies it. This repository
+has [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) entrypoints. Do not assume native memory features
 load Jason's independent project folder or perform the curation pass.
 
 Jason assumes a single writer with serialized writes. There is no lock or
