@@ -4,6 +4,13 @@
 
 **主動讀取、主動判斷需求、主動記錄、寫入後健檢並通報。** 使用者不必說「記住」，AI 也應自行保存有依據、未來有用的需求與經驗。不需要資料庫、伺服器或 hook；預設也沒有固定的索引行數／位元組門檻。
 
+**一般使用者：下載 ZIP → 解壓縮 → 用 AI 開啟資料夾。完全不需要 Git、clone、commit 或 PR。**
+
+[下載一般使用版 ZIP](https://github.com/Jason5330/jason-memory/releases/latest/download/jason-memory.zip) · [開始使用](START_HERE.md)
+
+使用版包含空白記憶索引、常駐規則與健檢工具，不含 `.git` 歷史或任何人的筆記。
+需要支援本機檔案與專案規則的 AI 工具，以及 Python 3.9+（可使用 AI 工具內建的 Python）。
+
 ## 目錄
 
 - [運作方式](#運作方式)
@@ -23,7 +30,7 @@
 ```text
 你的專案/
 ├── AGENTS.md / CLAUDE.md  # 依 host 選用的常駐記憶規則
-└── .jason-memory/         # 實際記憶庫，預設 git-ignore
+└── .jason-memory/         # 你的本機記憶庫
     ├── MEMORY.md          # 索引：一行連結＋一句摘要
     ├── verify-before-done.md
     ├── current-project.md
@@ -69,12 +76,25 @@ updated: 2026-09-09
 
 健檢工具需要 **Python 3.9+**，只使用標準函式庫。Codex 使用 `AGENTS.md`，Claude Code 使用 `CLAUDE.md`；其他 Agent 使用其支援的常駐規則檔。[Codex 官方規則載入說明](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
 
+### 直接使用下載版（推薦）
+
+1. 下載上方的一般使用版 ZIP，解壓到獨立的一般資料夾，例如桌面。
+2. 在 AI 工具中開啟解壓後包含 `AGENTS.md` 的 `jason-memory` 資料夾，建立新對話。
+3. 直接提出工作需求。空白索引已備好；AI 依常駐規則主動判斷需求、寫入並通報。
+
+也可以在 GitHub 選 **Code → Download ZIP** 下載原始碼；原始碼 ZIP 不含個人記憶，
+第一次使用由 AI 從範本建立索引。兩種方式都不需 Git，也不要執行 `git init`。
+若看到 `master`／`Create PR`，那是宿主 App 的 Git 介面，不是記憶功能；請改開
+新解壓的獨立資料夾，避免置於其他儲存庫內。詳見 [開始使用](START_HERE.md)。
+
+### 加入已存在的其他工作專案
+
 1. 下載本框架。它可以放在專案的 `jason-memory/` 子目錄或另外的固定位置。
 2. 在專案內建立記憶目錄，預設 `.jason-memory/`；索引不存在時，把 [索引範本](templates/MEMORY.md) 複製為 `MEMORY.md`。重跑安裝時保留既有索引與所有筆記。
 3. 把 [常駐規則範本](templates/standing-rules.md) 的「記憶（Jason-memory）」一節合併到專案根目錄的 `AGENTS.md` 或 `CLAUDE.md`。已有該節時更新該節，保留其他規則；不要重複附加。替換兩個佔位符：
    - `<MEMORY_ROOT>`：實際記憶路徑，例如 `.jason-memory`。
    - `<FRAMEWORK_ROOT>`：框架原始碼路徑，例如 `jason-memory` 或絕對路徑。
-4. 安裝時將記憶目錄加入 `.gitignore` 並確認忽略設定；若已被追蹤，說明此具體問題，不擅自更動既有追蹤資料。這是一次性安裝檢查，不建立 Git 監控，也不延伸成 add／commit／push 提醒。
+4. 一般資料夾直接略過 Git 設定。只有目標已知使用 Git 時，才將記憶目錄加入 `.gitignore`；若已知被追蹤，說明此具體問題，不擅自更動既有資料。不為記憶啟用而探測、初始化 Git，也不建立監控或提交提醒。
 5. 確認套用後的規則沒有佔位符殘留，索引及規則指定的 `SKILL.md`、兩支健檢工具都存在，然後執行健檢。
 
 **不需要修改 `.claude/settings.json` 或註冊任何事件。** 只複製框架但沒有建立記憶目錄、套用規則，記憶流程不會自動啟用。
@@ -91,7 +111,8 @@ updated: 2026-09-09
 依目前 host 選用 AGENTS.md（Codex）或 CLAUDE.md（Claude Code），將框架的
 templates/standing-rules.md 合併進去；已有記憶節則更新，保留其他規則。替換
 <MEMORY_ROOT> 和 <FRAMEWORK_ROOT> 為實際路徑。
-安裝時將實際記憶目錄加入 .gitignore 並確認忽略設定，不要註冊 hook。
+一般資料夾不需要任何 Git 操作；只有目標已知使用 Git 時才設定記憶目錄的
+忽略規則。不要為記憶啟用探測或初始化 Git、連接遠端，也不要註冊 hook。
 啟用主動判斷：使用者清楚表達的持久需求、叮嚀、偏好、糾正、專案限制，
 以及 AI 自行發現的可重用踩坑經驗，都按協議判斷並保存，不等「記住」指令。
 每則訊息（含第二輪以後）開始處理前重新判斷；一次性資料與可重用格式要求
@@ -152,7 +173,7 @@ templates/standing-rules.md 合併進去；已有記憶節則更新，保留其�
 
 通知中的連結與健檢數字必須使用實際結果。寫入或健檢失敗要明確說明；不能只有口頭說「記住了」。同輪多筆變更可合併通報，無變更不必通報「沒有記憶可存」。
 
-**記憶流程不包含 Git 狀態監控。** 安裝時處理 `.gitignore`，不代表日後每次建立檔案都要檢查是否追蹤或提交。一般記憶、安裝及工作完成回覆，都不附「尚未 git add/commit，需要的話再說」。只有使用者要求版本控制工作，或當前開發／審查任務確實需要時，才使用 Git；已授權的提交與推送直接完成。這也不代表自動提交所有檔案。
+**記憶流程不包含 Git 狀態監控。** 普通資料夾不做 Git 檢查；只有已知使用 Git 的安裝目標才處理 `.gitignore`，不代表日後每次建立檔案都要檢查是否追蹤或提交。一般記憶、安裝及工作完成回覆，都不附「尚未 git add/commit，需要的話再說」。只有使用者要求版本控制工作，或當前開發／審查任務確實需要時，才使用 Git；已授權的提交與推送直接完成。這也不代表自動提交所有檔案。
 
 ## 健檢
 
@@ -241,6 +262,15 @@ doctor 保留 **1 MiB 索引／4 MiB 單篇筆記的解析保護**，超過時�
 - 沒有內建語意搜尋或自動化的真實任務成效評測服務。可依情境清單實際重播，先測量召回與重犯情況，再決定是否增加搜尋能力。
 
 ## 開發與測試
+
+以下供框架維護者使用，一般使用者不需要執行。產生乾淨下載包：
+
+```bash
+python tools/build_download.py --output dist/jason-memory.zip
+```
+
+打包工具不呼叫 Git，只打包明確列出的公開檔案，並從範本建立空白索引；
+不讀取本機 `.jason-memory/`、`.git/` 或工作產物。目標 ZIP 已存在時拒絕覆寫。
 
 ```text
 jason-memory/

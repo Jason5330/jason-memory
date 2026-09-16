@@ -28,6 +28,11 @@ no built-in memory feature.
 
 ## 0. Where memory lives
 
+Git and GitHub are not runtime dependencies. A downloaded, extracted ordinary
+folder works without either. Do not run Git commands, initialize a repository,
+add a remote, or request a commit to enable memory. If the index is absent,
+create it from `templates/MEMORY.md`; never replace existing notes or an index.
+
 Memory lives under a single root directory, `<MEMORY_ROOT>`, that the **user can
 see, open, and audit**. Human-readability is the whole point — never hide the
 store somewhere the user will not look.
@@ -42,9 +47,11 @@ and follows the same index, dedup, correction, and retirement rules.
   the user explicitly chooses it. Content defaults to Traditional Chinese;
   field names, type values and Why/How labels remain English.
 - It MUST be configurable; never hard-code an absolute path in the skill.
-- If `<MEMORY_ROOT>` lives inside a git repository, it MUST be git-ignored —
-  memories routinely contain machine-local, sensitive but non-credential detail
-  (server IPs, ssh paths, serial numbers). Establish this during installation;
+- Only when the installation target is already known to use Git, ensure
+  `<MEMORY_ROOT>` is git-ignored. Ordinary folders skip this step; do not invoke
+  Git to discover repository status for memory setup. This exclusion protects
+  machine-local, sensitive but non-credential detail (server IPs, ssh paths,
+  serial numbers) from publication. Establish it during installation;
   recheck only if the store location or ignore configuration changes or there
   is concrete evidence of accidental tracking. Do not turn this into a Git
   status check on each task or write. (Credential values never belong in memory.)
@@ -523,7 +530,7 @@ cannot meet it without losing useful context, explain the tradeoff.
 Do not monitor repository status, enumerate untracked files, remind the user to
 stage/commit, or ask whether to push merely because a file or memory was created.
 Avoid messages such as "untracked, not yet git add/commit; let me know if needed."
-The one-time installation check of the memory directory's ignore rule does not
+For a known Git project, the installation check of its ignore rule does not
 authorize ongoing Git monitoring. Deduplication uses known sources and targeted
 reads, not a mandatory repository-wide Git scan.
 
