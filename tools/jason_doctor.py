@@ -82,10 +82,14 @@ _HOW_RE = re.compile(_LABEL + r"How[ \t]+to[ \t]+apply[ \t]*\*{0,2}[ \t]*[:：]"
 # strict label above is absent — a 'Why'/'How' line that looks like a label attempt.
 _WHY_NEAR = re.compile(_LABEL + r"Why\b", re.I | re.M)
 _HOW_NEAR = re.compile(_LABEL + r"How\b", re.I | re.M)
-# Index pointer target `](path.md)`: lazy + a real terminator after `.md` so a backup
-# like `note.md.bak` isn't truncated to `note.md`; control chars (incl. NUL) excluded so
-# a malformed pointer can't reach realpath and throw. `<?` tolerates an angle-bracket link.
-_PTR_RE = re.compile(r"\]\(\s*<?([^)>\s#?\x00-\x1f]+?\.(?i:md))(?=[)>\s#?]|$)")
+# Only complete ordinary links count as recall entries, never images or escaped
+# labels. Require paired angle brackets, a closed optional title, and the final
+# parenthesis; interrupted writes must not silently credit orphan notes.
+_PTR_RE = re.compile(
+    r'''(?<![!\\])\[[^\[\]\r\n]*\]\([ \t]*(?P<angle><)?'''
+    r'''(?P<target>[^()<>\s#?\x00-\x1f]+?\.(?i:md))'''
+    r'''(?:\#[^()<>\s\x00-\x1f]*)?(?(angle)>)'''
+    r'''(?:[ \t]+(?:"[^"\r\n]*"|'[^'\r\n]*'))?[ \t]*\)''')
 _INLINE_CODE_RE = re.compile(r"(?<!`)(`+)(?!`)(.*?)\1(?!`)")
 
 
@@ -154,9 +158,9 @@ def _index_targets(text):
     # Only active flat bullet entries are index pointers. A prose example,
     # comment, code span or fenced block does not activate a note.
     active = _active_markdown(text)
-    return [target for line in active.splitlines()
+    return [match.group('target') for line in active.splitlines()
             if re.match(r"^ {0,3}[-+*][ \t]+", line)
-            for target in _PTR_RE.findall(line)]
+            for match in _PTR_RE.finditer(line)]
 
 
 def _label_has_content(body, pattern):

@@ -3,7 +3,8 @@ name: jason
 description: >-
   Curated, file-based long-term memory for an AI agent. Use this skill (1) at the
   start of a task or when resuming unfinished work to recall via the memory index,
-  (2) when users express lasting requirements, preferences, corrections or project
+  (2) on every user message, including follow-up corrections and output requirements,
+  when users express reusable requirements, preferences or project
   constraints, or the agent learns a verified reusable lesson, without waiting
   for a request to remember, and (3) before compacting or opening a fresh thread to
   sync the current goal, state, decisions, constraints, blockers, and next step.
@@ -279,17 +280,30 @@ isolated cycle of notes is an issue even when its members reference each other.
 
 ### When to assess memory
 
+At the start of **each user turn**, including the second and later messages in
+one task, separately assess the immediate data/action and any reusable user
+requirement. A previous "nothing to remember" decision applies only to the
+information assessed then; never cache it for a task, artifact, or conversation.
+Do this before carrying out the request, not only at task startup or compaction.
+
 Assess new information when the user states a requirement, preference, reminder,
 correction, goal or constraint; when you discover a reusable failure or verify a
 non-obvious solution yourself; and once before ending each turn. The final pass
-catches omissions, not a requirement to create a note every turn. Save a clear,
-useful fact at the next practical point in the current turn, not only at compaction.
+catches omissions, not a requirement to create a note every turn. For a new
+reusable requirement, complete deduplication, note/index writes, checks and the
+user notification **before delivering the artifact or final response**. An
+artifact skill's completion does not replace this memory obligation. If saving
+fails, explicitly report that it remains unsaved rather than ending with only
+"file updated". Do not postpone a clear requirement until another user prompt.
 
 Use meaning, evidence and future usefulness rather than keywords:
 
 | Situation | Decision |
 |---|---|
 | "Keep the original data in future reports" | Save as `feedback`; the request itself confirms the preference. |
+| After a random test export: "輸出的表格，欄位標題都必須填滿淺藍色" | Save the general header-format requirement as project-scoped `feedback`; do not save the random rows. |
+| "只把這個檔案的標題列改成淺藍色" | A particular-file edit; do not infer a reusable preference. |
+| "這次的測試資料必須正好三筆" | A task-local constraint, despite the word "must". |
 | "This time, skip the chart" | Apply now; do not turn it into a lasting preference. |
 | "This project must work offline" | Save as `project` if not already documented. |
 | User corrects the scope of an existing preference | Update that note; the current instruction takes precedence. |
@@ -303,6 +317,15 @@ the stated scope, and not excluded below? When yes, write without asking whether
 to remember it. When scope is unclear, retain only the explicit task constraint;
 ask only if resolving that uncertainty is necessary for the work. Do not invent
 personal traits or cross-project preferences.
+
+The user need not say "in future", "always" or "remember" to express a reusable
+rule. Determine whether the statement governs a class of outputs or the way you
+work, rather than just one identified artifact. "All output tables must ..." is
+a rule for that output class; save it within the current project unless a wider
+scope was explicitly chosen. "This file must ..." alone is not a lasting rule.
+Examples explain classification; never install their sample colors or preferences
+as real user memories. Test data can be disposable while its formatting rule is
+durable. Reassess each separately, including after a prior skip decision.
 
 Record the source and applicability in the existing note body, without changing
 the frontmatter schema. For lessons, include the triggering condition, observed
@@ -321,9 +344,12 @@ Save a memory when you learn something durable that will matter in a *future*
 session. Before writing, run the checks in this order:
 
 1. **Negative scope — should this exist at all?** Do NOT save:
-   - anything the repo, git history, code, README, or the project's own
-     instruction file (e.g. CLAUDE.md) already records — those are the source of
-     truth; pointing a memory at them only creates drift. A live `project` note
+   - implementation facts already available from repo/git/code, or user rules
+     explicitly recorded with the same scope in existing memory or maintained
+     project instructions. A generated file's appearance or one implementation
+     of a request is **not** an explicit record of the user's reusable intent;
+     do not skip a preference just because you applied it to today's artifact.
+     A live `project` note
      may carry the few **stable** pointers needed to resume (branch name,
      issue/PR number, file path) and must re-verify them on recall; it may
      record a **settled fact** (what shipped, when, what was decided) but
@@ -349,6 +375,15 @@ session. Before writing, run the checks in this order:
 2. **Dedup — does a memory already cover this?** Read the index; if an existing
    file covers the same ground, **update that file** (and bump `updated:`) rather
    than create a near-duplicate.
+
+   A correction must update the source of the old rule. If the user's previous
+   preference exists only in a maintained project instruction, update that
+   user-owned preference there rather than adding a contradictory lower-priority
+   note. Preserve unrelated instructions and do not rewrite framework examples
+   as user preferences. If that source cannot be edited, report the conflict and
+   the unsynchronized source; do not claim future recall is fixed by a note alone.
+   Check relevant existing notes for the same superseded rule, and notify any
+   change to the standing preference just as you would a memory change.
 
 3. **Write the file.** Pick the type, write a sharp `description`, fill the
    required fields for that type (Why/How for feedback & project; absolute dates

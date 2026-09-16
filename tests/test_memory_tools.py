@@ -98,6 +98,22 @@ class StoreTest(unittest.TestCase):
                                {'a.md': note('a')})
         self.assertEqual(code, 0)
 
+    def test_incomplete_links_and_images_are_not_index_entries(self):
+        for index in ('- [A](a.md', '- ![A](a.md)', r'- \[A](a.md)',
+                      '- [A](<a.md)', '- [A](a.md>)', '- [A](a.md.bak)',
+                      '- [A](a.md "unclosed)', '- [A](a.md#anchor'):
+            with self.subTest(index=index):
+                code, out = self.diagnose(index, {'a.md': note('a')})
+                self.assertEqual(code, 1)
+                self.assertIn('orphan note', out)
+
+    def test_complete_links_accept_anchors_and_titles(self):
+        for index in ('- [A](a.md#anchor)', '- [A](<a.md#anchor>)',
+                      '- [A](a.md "Title")', "- [A](a.md 'Title')",
+                      '- [A](<a.md> "Title")'):
+            with self.subTest(index=index):
+                self.assertEqual(self.diagnose(index, {'a.md': note('a')})[0], 0)
+
     def test_literal_comment_marker_does_not_hide_later_pointers(self):
         for example in ('Example `<!--`', '```example <!--\nignored\n```'):
             with self.subTest(example=example):

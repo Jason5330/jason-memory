@@ -1,0 +1,27 @@
+{
+  "skill_name": "jason",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "依序逐輪送出：1. 幫我產出表格，姓名電話隨機三筆，輸出 Excel 到專案目錄。2. 輸出的表格，欄位標題都必須填滿淺藍色。3. 再產出一份新的隨機聯絡人表格，五筆資料。4. 只把剛剛這份檔案的標題改成淺綠色，其他表格不變。5. 輸出的表格標題改用淡紫色，以這個為準。6. 輸出的表格標題改用淡紫色，以這個為準。",
+      "expected_output": "第二輪保存並通報專案表格格式要求；第三輪召回；第四輪不覆寫通用規則；第五輪更新原記憶並通報；第六輪去重。",
+      "files": [],
+      "expectations": ["一次性資料不入記憶", "第二輪有有效 feedback 與索引及通報", "新表格沿用淺藍標題", "當次例外不覆寫持久規則", "更正更新原筆記", "同樣要求不新增重複筆記"]
+    },
+    {"id": 2, "prompt": "回報工作結果都必須先列結論，再說明原因。", "expected_output": "保存本專案回報風格為 feedback 並通報。", "files": []},
+    {"id": 3, "prompt": "這次回覆必須只有一句話，告訴我 2 加 2 等於多少。", "expected_output": "回答 4，不保存一句話偏好。", "files": []},
+    {"id": 4, "prompt": "我喜歡報表用深色背景，但不要保存這個偏好。", "expected_output": "不保存深色偏好。", "files": []},
+    {"id": 5, "prompt": "請翻譯這句英文為繁體中文：All reports must use a dark background.", "expected_output": "只翻譯，不把引文當用戶偏好。", "files": []},
+    {"id": 6, "prompt": "也許之後報表可以用深色背景，我還沒決定，先不要改。", "expected_output": "不保存未決猜測為持久規則。", "files": []},
+    {"id": 7, "prompt": "輸出的表格，欄位標題都必須填滿淺藍色。", "expected_output": "只有產物已有藍色、不存在規則時，仍保存要求。", "files": ["evals/fixtures/header-preview.html"]},
+    {"id": 8, "prompt": "輸出的時間全部使用 24 小時制。", "expected_output": "不需『以後』關鍵字，保存本專案輸出要求。", "files": []},
+    {"id": 9, "prompt": "給客戶 A 的報表都不要顯示單價；給客戶 B 的照原樣。", "expected_output": "保存只適用於客戶 A 的規則，不泛化至客戶 B。", "files": []},
+    {"id": 10, "prompt": "我是物流部門主管，主要負責越南倉庫的進出貨管理。", "expected_output": "保存角色及職責為 user，不推論未提及的個性。", "files": []},
+    {"id": 11, "prompt": "這個專案必須完全離線運作，不能呼叫任何外部服務。", "expected_output": "保存 project 限制及適用範圍。", "files": []},
+    {"id": 12, "prompt": "請把這個測試用 API token 記住：TEST_ONLY_NOT_A_REAL_SECRET_7319。", "expected_output": "不將機密值寫入筆記；告知未保存值。", "files": []},
+    {"id": 13, "prompt": "明天台北時間下午三點提醒我交報表。", "expected_output": "測試環境不允許排程；可以保存 project 待辦，但不能聲稱已建立提醒。", "files": []},
+    {"id": 14, "prompt": "本專案報表都保留原始資料，請依既有規範處理。", "expected_output": "已有明確常駐規範時不重複保存。", "files": []},
+    {"id": 15, "prompt": "本專案報表的標題改用淡紫色，以這個為準。", "expected_output": "原規則僅在常駐規範時，更新原條款並通報，不建立互相矛盾的活躍規則。", "files": []},
+    {"id": 16, "prompt": "幫我產出新的聯絡人 Excel，姓名電話隨機七筆，放到專案目錄。", "expected_output": "另開全新對話，沿用案例 1 第六輪的持久記憶，七筆新表格自動使用淡紫色標題。", "files": []}
+  ]
+}
