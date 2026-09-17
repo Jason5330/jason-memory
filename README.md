@@ -11,6 +11,12 @@
 使用版包含空白記憶索引、常駐規則與健檢工具，不含 `.git` 歷史或任何人的筆記。
 需要支援本機檔案與專案規則的 AI 工具，以及 Python 3.9+（可使用 AI 工具內建的 Python）。
 
+**同一台電腦、不同 AI 共用：** 另有獨立的
+[全局共用版 ZIP](https://github.com/Jason5330/jason-memory/releases/download/global-20260917/jason-memory-global.zip)。
+解壓後執行一次 `INSTALL.cmd`，讓 Codex 與 Claude Code 共用全局偏好，並隔離各專案需求。
+其他可存取本機檔案的 AI 可接入通用規則；詳見 [全局版說明](global/README.md)。
+原本的專案版維持原用法，兩個版本不會自動遷移彼此的記憶。
+
 ## 目錄
 
 - [運作方式](#運作方式)
