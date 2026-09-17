@@ -58,6 +58,48 @@ class GlobalInstallTests(unittest.TestCase):
         self.assertTrue((self.home / "framework/tools/jason_check.py").is_file())
         self.assertTrue((self.home / "GENERIC_INSTRUCTIONS.md").is_file())
 
+    def test_claude_import_resolves_spaces_unicode_and_existing_memory_survives(self):
+        self.home = self.base / "共享 記憶"
+        self.profile = self.base / "同事 profile"
+        self.run_install()
+        target = self.profile / ".claude/CLAUDE.md"
+        index = self.home / "memory/shared/MEMORY.md"
+        line = next(x for x in target.read_text(encoding="utf-8").splitlines() if x.startswith("@"))
+        imported = (target.parent / line[1:].replace("\\ ", " ")).resolve()
+        self.assertEqual(imported, index.resolve())
+        self.assertEqual(index.read_bytes(), (self.package / "templates/MEMORY.md").read_bytes())
+        self.assertNotIn("@", (self.profile / ".codex/AGENTS.md").read_text(encoding="utf-8"))
+        index.write_bytes(b"existing index must survive")
+        self.run_install()
+        self.assertEqual(index.read_bytes(), b"existing index must survive")
+        self.assertFalse((self.home / "memory/projects").exists())
+
+    def test_upgrade_moves_legacy_block_to_front_and_uninstall_restores_user_bytes(self):
+        target = self.profile / ".claude/CLAUDE.md"
+        prefix = b"\xef\xbb\xbf# My rules\r\nKeep this first user rule.\r\n"
+        suffix = b"\r\nKeep this last user rule."
+        self.write_config(target, prefix + START + b"\nlegacy\n" + END + suffix)
+        self.run_install("--agent", "claude")
+        installed = target.read_bytes()
+        self.assertTrue(installed.startswith(b"\xef\xbb\xbf" + START))
+        self.assertIn(END + b"\n# My rules", installed)
+        self.run_install("--agent", "claude")
+        self.assertEqual(target.read_bytes(), installed)
+        self.run_install("--agent", "claude", "--uninstall")
+        self.assertEqual(target.read_bytes(), prefix + suffix)
+
+    def test_unicode_leading_relative_import_has_dot_prefix(self):
+        self.home = self.profile / '.claude' / '共享 memory'
+        self.run_install('--agent', 'claude')
+        data = (self.profile / '.claude/CLAUDE.md').read_text(encoding='utf-8')
+        self.assertIn('@./共享\\ memory/memory/shared/MEMORY.md\n', data)
+
+    def test_invalid_shared_index_prevents_host_edits(self):
+        index = self.home / "memory/shared/MEMORY.md"
+        index.mkdir(parents=True)
+        self.run_install(ok=False)
+        self.assertFalse(self.profile.exists())
+
     def test_idempotent_install_backup_and_exact_uninstall_preserve_notes(self):
         target = self.profile / ".codex/AGENTS.md"
         original = b"\xef\xbb\xbf# user rules\r\n\r\nKeep all bytes: \xe4\xb8\xad\xe6\x96\x87"

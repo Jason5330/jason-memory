@@ -43,10 +43,18 @@ class DownloadTest(unittest.TestCase):
                 self.assertTrue(all(private.encode() not in zipfile.read(n) for n in names))
                 zipfile.extractall(folder / 'unpacked')
             project = folder / 'unpacked/jason-memory'
+            # The downloaded Claude entrance must resolve to the packaged blank index.
+            entrance = project / 'CLAUDE.md'
+            imports = [line[1:] for line in entrance.read_text(encoding='utf-8').splitlines()
+                       if line.startswith('@')]
+            self.assertEqual(imports, ['.jason-memory/MEMORY.md'])
+            self.assertEqual((entrance.parent / imports[0]).read_bytes(),
+                             (project / 'templates/MEMORY.md').read_bytes())
             for tool, argument in [('jason_check.py', '.jason-memory/MEMORY.md'),
                                    ('jason_doctor.py', '.jason-memory')]:
-                result = subprocess.run([sys.executable, 'tools/' + tool, argument],
-                                        cwd=project, capture_output=True, text=True, timeout=15)
+                result = subprocess.run([sys.executable, '-X', 'utf8', 'tools/' + tool, argument],
+                                        cwd=project, capture_output=True, text=True,
+                                        encoding='utf-8', timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse((project / '.git').exists())
             self.assertEqual((source / '.jason-memory/MEMORY.md').read_text(), private)

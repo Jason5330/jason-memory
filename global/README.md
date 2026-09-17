@@ -47,7 +47,14 @@ python global/install.py --agent claude
     projects/<識別碼>/       依專案根目錄隔離的筆記及索引
 ```
 
-記憶目錄與空白索引會在 AI 首次執行 `context` 時建立，既有筆記不會被重設。
+安裝時即建立缺少的 `memory/shared/MEMORY.md`；既有索引及筆記不會被重設。
+Claude Code 的管理入口會直接匯入這份共用索引；路徑由安裝器依實際位置計算，
+支援同事的使用者目錄、中文及空白，不寫死任何人的名稱。
+個別專案索引仍在首次 `context` 時建立；不把所有專案索引匯入全局入口。
+每輪第一則可見回覆前，AI 先執行 `context` 刷新全局與目前專案索引，再讀取
+適用的開場、格式及任務筆記；匯入的啟動快照不取代跨 AI 更新檢查。
+簡單問答也適用。正常召回不說「我來讀取記憶」「已讀取記憶」「本次無需記憶」；
+實際保存、修改、封存才通報，讀寫失敗才說明問題。
 同一專案在不同 AI 必須使用相同的實體專案根目錄；不同專案使用不同索引。
 專案根目錄搬動或更名後會得到新的識別碼，需另行搬移對應專案記憶；全局偏好不受影響。
 全局需求的專案例外只寫入該專案，當次要求不自動變成永久規則。
@@ -102,6 +109,8 @@ Codex 會尊重 `CODEX_HOME`，Claude Code 會尊重 `CLAUDE_CONFIG_DIR`。
 ## 更新與卸載
 
 重新執行安裝會更新框架及同一段入口，不重複新增、不覆寫記憶。
+升級此版請重新執行 `INSTALL.cmd`，再重新啟動 Claude Code 工作階段。
+管理區塊會移到規則檔最前面，其他內容保留；卸載可移除該區塊與其分隔符。
 每次實際修改既有 AI 設定前，會在旁邊建立 `.jason-memory-<識別碼>.bak` 備份，
 原有非管理區塊內容會保留。遇到損壞或重複管理區塊時會停止，請先檢查及備份再修正。
 
@@ -118,3 +127,6 @@ python global/install.py --agent both --uninstall
 
 [本版測試方法與結果](https://github.com/Jason5330/jason-memory/blob/master/tests/global-validation.md)
 區分安裝器測試、真實 AI 共用測試與尚未涵蓋的宿主條件。
+
+[啟動匯入修補的測試與剩餘限制](https://github.com/Jason5330/jason-memory/blob/master/tests/recall-validation.md)。
+啟動匯入不保證模型每次完整遵守；本版未新增 hook 或執行攔截器。

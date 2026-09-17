@@ -12,7 +12,7 @@
 需要支援本機檔案與專案規則的 AI 工具，以及 Python 3.9+（可使用 AI 工具內建的 Python）。
 
 **同一台電腦、不同 AI 共用：** 另有獨立的
-[全局共用版 ZIP](https://github.com/Jason5330/jason-memory/releases/download/global-20260917/jason-memory-global.zip)。
+[全局共用版 ZIP](https://github.com/Jason5330/jason-memory/releases/download/recall-20260917/jason-memory-global.zip)。
 解壓後執行一次 `INSTALL.cmd`，讓 Codex 與 Claude Code 共用全局偏好，並隔離各專案需求。
 其他可存取本機檔案的 AI 可接入通用規則；詳見 [全局版說明](global/README.md)。
 原本的專案版維持原用法，兩個版本不會自動遷移彼此的記憶。
@@ -44,6 +44,13 @@
 ```
 
 任務開始時，Agent 明確讀取 `MEMORY.md`，根據摘要開啟相關筆記；收到需求、叮嚀、糾正或學到可重用經驗時，主動判斷並更新既有筆記或新增筆記，再同步索引、執行健檢並在同輪通報使用者。每輪結束前補查漏記，沒有值得記的內容就不新增。
+
+Claude Code 的入口現在用 `@.jason-memory/MEMORY.md` 在啟動時直接匯入索引。
+在第一則可見回覆（包含進度說明）之前，AI 須先讀適用的開場、格式與任務筆記；
+簡單問答也適用。後續訊息重新讀取索引，避免使用更正前的內容。
+正常召回保持安靜，不說「我來讀取記憶」「已讀取記憶」或「本次無需記憶」。
+只有實際保存、修改、封存才通報，讀寫失敗才說明問題。
+匯入只解決索引載入，不保證模型完全遵守；相關筆記仍須讀取，也仍受宿主權限限制。
 
 | 類型 | 記錄內容 |
 |---|---|
@@ -103,6 +110,14 @@ updated: 2026-09-09
 4. 一般資料夾直接略過 Git 設定。只有目標已知使用 Git 時，才將記憶目錄加入 `.gitignore`；若已知被追蹤，說明此具體問題，不擅自更動既有資料。不為記憶啟用而探測、初始化 Git，也不建立監控或提交提醒。
 5. 確認套用後的規則沒有佔位符殘留，索引及規則指定的 `SKILL.md`、兩支健檢工具都存在，然後執行健檢。
 
+Claude Code 另需在記憶入口最前面加入一行實際匯入，不能放在反引號或程式碼區塊內。
+專案根目錄的 `CLAUDE.md` 用 `@.jason-memory/MEMORY.md`；若入口放在
+`.claude/CLAUDE.md`，用 `@../.jason-memory/MEMORY.md`。匯入相對於規則檔本身，
+不是終端機工作目錄。自訂路徑含空白時以反斜線跳脫空白（如 `@../shared\ memory/MEMORY.md`）；
+不要只用引號包住整條路徑；相對路徑以 `./` 或 `../` 開頭，避免中文開頭的路徑漏載。
+先建立缺少的索引，既有索引不覆寫。Codex 不使用此匯入語法。
+[Claude Code 匯入說明](https://code.claude.com/docs/en/memory#import-additional-files)。
+
 **不需要修改 `.claude/settings.json` 或註冊任何事件。** 只複製框架但沒有建立記憶目錄、套用規則，記憶流程不會自動啟用。
 
 若直接在本框架專案工作，根目錄的 [AGENTS.md](AGENTS.md) 和 [CLAUDE.md](CLAUDE.md) 已指向本機 `.jason-memory/` 與本專案的工具；它們不是供其他路徑直接複製的安裝範本。更新規則後開啟新對話，確認 host 有載入常駐規則。
@@ -117,6 +132,8 @@ updated: 2026-09-09
 依目前 host 選用 AGENTS.md（Codex）或 CLAUDE.md（Claude Code），將框架的
 templates/standing-rules.md 合併進去；已有記憶節則更新，保留其他規則。替換
 <MEMORY_ROOT> 和 <FRAMEWORK_ROOT> 為實際路徑。
+把回覆前召回規則放在記憶入口最前面。Claude Code 另加入相對於 CLAUDE.md
+所在位置的實際 @ 匯入行，讓索引在啟動時載入；不要放在程式碼區塊或反引號內。
 一般資料夾不需要任何 Git 操作；只有目標已知使用 Git 時才設定記憶目錄的
 忽略規則。不要為記憶啟用探測或初始化 Git、連接遠端，也不要註冊 hook。
 啟用主動判斷：使用者清楚表達的持久需求、叮嚀、偏好、糾正、專案限制，

@@ -14,6 +14,18 @@ description: >-
 
 # Jason — curated file-based long-term memory
 
+## Recall before the first visible reply
+
+For every message, including trivial questions, obtain the current full index
+and read applicable response, opening, language, formatting and task notes before
+the first user-visible text, including progress commentary. A complete index
+imported at session startup can serve that first turn; re-read it on follow-ups
+to observe corrections. Summaries locate notes, not replace their bodies.
+Recall silently: no announcements of reading, successful recall, or "nothing to
+remember". Notify actual saves/updates/retirements; explain material read/write
+failures honestly. Current user instructions and higher-priority rules prevail.
+Apply only the relevant scope, and use the actual current date when required.
+
 Jason is a *discipline*, not a database. Memory is a directory of small,
 human-readable markdown files plus one index. There is no vector store, no
 embeddings, no server. You (the agent) read the index, open the files that

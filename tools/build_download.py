@@ -14,7 +14,7 @@ PACKAGE_FILES = (
     'templates/example-project.md', 'tools/jason_check.py',
     'tools/jason_doctor.py', 'tools/build_download.py',
     'tests/test_memory_tools.py', 'tests/test_download.py',
-    'tests/behavioral-memory.md', 'evals/README.md', 'evals/evals.json',
+    'tests/behavioral-memory.md', 'tests/recall-validation.md', 'evals/README.md', 'evals/evals.json',
     'evals/fixtures/header-preview.html', 'evals/results/2026-09-16.md',
 )
 
