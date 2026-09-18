@@ -66,4 +66,7 @@ python "<FRAMEWORK_ROOT>/tools/jason_doctor.py" "<MEMORY_ROOT>"
 框架 tools/memory_runtime.py --config 目標設定檔；不要沿用第二套 `.ai-memory` 路徑。
 依 [runtime 協議](../docs/memory-runtime.md) 用批次 apply 更正所有相關筆記，
 每次成功變更在最終回覆末尾通知並連結實際筆記；正常讀取保持安靜。
+成功宣告須有本輪 runtime apply／verify 的工具收據及讀回正文，保留完整 JSON 輸出。
+要求已存在而需要確認時，用 verify --scope project --note 相對筆記路徑，不重寫。
+沒有成功證據就明說未保存／未能確認保存，不編造檔名或健檢結果。
 Claude 使用 tools/install_hooks.py --project 目標根目錄 合併事件，不覆蓋其他設定。

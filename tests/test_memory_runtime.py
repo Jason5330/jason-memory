@@ -35,8 +35,11 @@ class RuntimeTests(unittest.TestCase):
 
     def apply(self, updates, retire=None, revision=None):
         with runtime.opened(self.config):
-            return runtime.apply(self.root, {'expected_revision': revision or runtime.revision(self.root),
-                                            'updates': updates, 'retire': retire or []})
+            result = runtime.apply(self.root, {'expected_revision': revision or runtime.revision(self.root),
+                                             'updates': updates, 'retire': retire or []})
+        if list((self.root / '.hook-state').glob('*.json')):
+            self.event('PostToolUse', tool_name='Bash', tool_response={'stdout': json.dumps(result)})
+        return result
 
     def event(self, name, **kwargs):
         return hook.handle({'hook_event_name': name, 'session_id': 'test', 'cwd': str(self.project), **kwargs}, self.config)
@@ -201,7 +204,7 @@ class RuntimeTests(unittest.TestCase):
         self.event('SessionStart')
         self.apply({'job.md': note('job')})
         self.assertEqual(self.event('Stop', last_assistant_message='完成')['decision'], 'block')
-        self.assertEqual(self.event('Stop', last_assistant_message='完成', stop_hook_active=True), {})
+        self.assertFalse(self.event('Stop', last_assistant_message='完成', stop_hook_active=True)['continue'])
         self.assertEqual(self.event('Stop', last_assistant_message='已將此要求記憶在 [job.md](' + str(self.root / 'job.md') + ')。'), {})
 
     def test_no_change_no_notification(self):
@@ -259,6 +262,160 @@ class RuntimeTests(unittest.TestCase):
         event.update(hook_event_name='UserPromptSubmit', cwd=str(child))
         self.assertEqual(hook.handle(event, config), {})
         self.assertIn(str(self.project), first['hookSpecificOutput']['additionalContext'])
+
+    def notice(self, path=None):
+        return '已將此要求記憶在 [筆記](' + str(path or self.root / 'job.md') + ')，健檢通過。'
+
+    def test_false_success_without_any_write_is_blocked(self):
+        self.event('SessionStart')
+        reply = self.notice(self.root / 'feedback/report-structure-first.md')
+        result = self.event('Stop', last_assistant_message=reply)
+        self.assertEqual(result['decision'], 'block')
+        self.assertIn('Unsupported memory-success', result['reason'])
+        self.assertFalse((self.root / 'feedback/report-structure-first.md').exists())
+
+    def test_false_success_without_startup_baseline_is_blocked(self):
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+        self.apply({'job.md': note('job')})
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice(), stop_hook_active=True), {})
+
+    def test_plain_chinese_simplified_english_claims_are_checked(self):
+        phrases = ['了解，這個偏好已記錄。', '已記住。', '已經保存這個需求。', '此需求已紀錄。', '記住了。', '偏好已寫入。',
+                   '已將這項要求記憶在記憶系統。', '偏好已保存到記憶系統。',
+                   '这个偏好已经记录。', 'Memory saved.', 'I have saved your preference.', 'Your preference has been recorded.']
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                self.event('UserPromptSubmit')
+                self.assertEqual(self.event('Stop', last_assistant_message=phrase)['decision'], 'block')
+
+    def test_failed_future_quoted_and_unrelated_statements_do_not_trigger(self):
+        phrases = ['尚未保存記憶。', '無法保存這個要求。', 'I have not saved your preference.',
+                   '我會在保存成功後通報。', '範例：「已記住」。', '> 已記住。',
+                   '```text\n已保存記憶。\n```', '已更新 Excel 表格。', '已修補記憶工具。',
+                   '已更新 README。\n這份文件說明記憶功能。', '42']
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                self.event('UserPromptSubmit')
+                self.assertEqual(self.event('Stop', last_assistant_message=phrase), {})
+
+    def test_persistent_false_success_ends_with_explicit_failure_warning(self):
+        self.event('SessionStart')
+        self.event('Stop', last_assistant_message=self.notice())
+        result = self.event('Stop', last_assistant_message=self.notice(), stop_hook_active=True)
+        self.assertFalse(result['continue'])
+        self.assertIn('未通過驗證', result['systemMessage'])
+        self.assertEqual(self.event('Stop', last_assistant_message='更正：尚未保存記憶。', stop_hook_active=True), {})
+
+    def test_existing_note_needs_current_turn_verification(self):
+        self.apply({'job.md': note('job')})
+        self.event('SessionStart')
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+        before = runtime.revision(self.root)
+        with runtime.opened(self.config):
+            result = runtime.verify(self.root, ['job.md'])
+        self.event('PostToolUse', tool_name='Bash', tool_response={'stdout': json.dumps(result)})
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice(), stop_hook_active=True), {})
+        self.assertEqual(runtime.revision(self.root), before)
+        self.assertFalse(result['changed'])
+
+    def test_noop_apply_provides_evidence_without_rewriting_note(self):
+        self.apply({'job.md': note('job')})
+        self.event('SessionStart')
+        timestamp = (self.root / 'job.md').stat().st_mtime_ns
+        result = self.apply({'job.md': note('job')})
+        self.assertFalse(result['changed'])
+        self.assertEqual((self.root / 'job.md').stat().st_mtime_ns, timestamp)
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice()), {})
+
+    def test_receipt_in_assistant_prose_is_not_tool_evidence(self):
+        self.event('SessionStart')
+        with runtime.opened(self.config):
+            result = runtime.apply(self.root, {'expected_revision': runtime.revision(self.root),
+                                   'updates': {'job.md': note('job')}, 'retire': []})
+        reply = self.notice() + '\n' + json.dumps(result)
+        self.assertEqual(self.event('Stop', last_assistant_message=reply)['decision'], 'block')
+
+    def test_stale_receipt_from_previous_turn_is_rejected(self):
+        result = self.apply({'job.md': note('job')})
+        self.event('SessionStart')
+        self.event('PostToolUse', tool_name='Bash', tool_response={'stdout': json.dumps(result)})
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+
+    def test_failed_tool_output_does_not_supply_evidence(self):
+        self.event('SessionStart')
+        with runtime.opened(self.config):
+            result = runtime.apply(self.root, {'expected_revision': runtime.revision(self.root),
+                                   'updates': {'job.md': note('job')}, 'retire': []})
+        self.event('PostToolUse', tool_name='Bash', tool_response={'stdout': json.dumps(result), 'exitCode': 1})
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+
+    def test_failed_write_cannot_claim_success_on_a_clean_empty_index(self):
+        self.event('SessionStart')
+        with self.assertRaises(ValueError):
+            self.apply({'job.md': 'invalid note'})
+        self.assertFalse(runtime.context({'project': self.root})['project']['audit']['structural_errors'])
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+
+    def test_receipt_invalidated_if_note_is_changed_or_deleted(self):
+        for delete in (False, True):
+            with self.subTest(delete=delete):
+                self.event('UserPromptSubmit')
+                self.apply({'job.md': note('job')})
+                if delete:
+                    (self.root / 'job.md').unlink()
+                else:
+                    (self.root / 'job.md').write_text(note('job', 'teacher'), encoding='utf-8')
+                self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+
+    def test_receipt_for_other_note_does_not_validate_claim(self):
+        self.apply({'job.md': note('job')})
+        self.event('SessionStart')
+        self.apply({'other.md': note('other', subject='user:bob')})
+        reply = self.notice() + '\n已保存另一份記憶 [other](' + str(self.root / 'other.md') + ')'
+        self.assertEqual(self.event('Stop', last_assistant_message=reply)['decision'], 'block')
+
+    def test_receipt_for_different_root_cannot_be_reused(self):
+        self.event('SessionStart')
+        self.event('PostToolUse', tool_name='Bash', tool_response={'receipt': 'a' * 32, 'receipt_root': str(self.project)})
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+
+    def test_index_only_receipt_does_not_prove_preference_saved(self):
+        self.event('SessionStart')
+        self.apply({})
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice(self.root / 'MEMORY.md'))['decision'], 'block')
+
+    def test_genuine_index_repair_notice_is_allowed(self):
+        self.event('SessionStart')
+        self.apply({})
+        reply = '已更新記憶索引 [索引](' + str(self.root / 'MEMORY.md') + ')。'
+        self.assertEqual(self.event('Stop', last_assistant_message=reply), {})
+
+    def test_multiple_saves_in_one_turn_can_share_one_notice(self):
+        self.event('SessionStart')
+        self.apply({'job.md': note('job')})
+        self.apply({'other.md': note('other', subject='user:bob')})
+        reply = self.notice() + '\n' + self.notice(self.root / 'other.md')
+        self.assertEqual(self.event('Stop', last_assistant_message=reply), {})
+
+    def test_corrupt_index_invalidates_receipt(self):
+        self.event('SessionStart')
+        self.apply({'job.md': note('job')})
+        (self.root / 'MEMORY.md').write_text('# Empty index\n', encoding='utf-8')
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice())['decision'], 'block')
+
+    def test_global_false_success_and_verified_save(self):
+        self.config.unlink()
+        config = self.project / 'global.json'
+        config.write_text('{"version":1,"mode":"global","home":"shared"}')
+        base = {'session_id': 'global-proof', 'cwd': str(self.project)}
+        hook.handle({**base, 'hook_event_name': 'SessionStart'}, config)
+        response = hook.handle({**base, 'hook_event_name': 'Stop', 'last_assistant_message': '已記住。'}, config)
+        self.assertEqual(response['decision'], 'block')
+        with runtime.opened(config, self.project) as (_, _, roots):
+            root = roots['global']
+            saved = runtime.apply(root, {'expected_revision': runtime.revision(root), 'updates': {'job.md': note('job')}, 'retire': []}, 'global')
+        hook.handle({**base, 'hook_event_name': 'PostToolUse', 'tool_name': 'Bash', 'tool_response': {'stdout': json.dumps(saved)}}, config)
+        self.assertEqual(hook.handle({**base, 'hook_event_name': 'Stop', 'last_assistant_message': self.notice(root / 'job.md')}, config), {})
 
 
 if __name__ == '__main__':

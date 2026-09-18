@@ -21,6 +21,9 @@ use versioned batch apply through tools/memory_runtime.py and .jason-memory.json
 Search all active notes for the same fact, preserve unrelated facts, and update
 all affected notes together. Add stable jason-facts metadata to new/corrected facts.
 Every successful memory change must end with a visible notice and actual note link.
+A success claim requires a current-turn apply/verify receipt from tool output and
+matching on-disk content. For an unchanged preference, run verify --note RELATIVE_NOTE
+rather than rewriting it. Preserve the runtime JSON output; do not invent receipts.
 The runtime protocol supersedes older manual-write instructions below.
 
 ## Recall before the first visible reply

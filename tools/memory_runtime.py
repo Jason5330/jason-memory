@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 import uuid
 
 import memory_facts
@@ -222,6 +223,73 @@ def context(roots):
     return result
 
 
+def receipt_path(root, relative):
+    part = Path(relative)
+    if (part.is_absolute() or '..' in part.parts or not part.parts or '\\' in relative
+            or any(p.startswith('.') for p in part.parts) or part.suffix.casefold() != '.md'):
+        raise ValueError('Invalid receipt note path')
+    return storelib.safe(root / part, root)
+
+
+def issue_receipt(root, paths, operation):
+    """Issue evidence only after reading the committed files back under the store lock."""
+    data = notes(root)
+    index = (root / 'MEMORY.md').read_text(encoding='utf-8-sig')
+    validate(data, index)
+    files = {}
+    for path in paths:
+        relative = Path(path).relative_to(root).as_posix()
+        target = receipt_path(root, relative)
+        if target.stat().st_size > storelib.doctor.NOTE_READ_CAP:
+            raise ValueError('Receipt note exceeds reading limit')
+        files[relative] = storelib.digest(target.read_text(encoding='utf-8-sig'))
+    receipt = {'version': 1, 'id': uuid.uuid4().hex, 'root': str(root),
+               'created_ns': time.time_ns(), 'operation': operation,
+               'index_sha': storelib.digest(index), 'files': files}
+    folder = storelib.safe(root / '.receipts', root)
+    folder.mkdir(exist_ok=True)
+    storelib.atomic_write(folder / (receipt['id'] + '.json'), json.dumps(receipt, ensure_ascii=True))
+    return {'receipt': receipt['id'], 'receipt_root': str(root)}
+
+
+def check_receipt(root, receipt_id, since=0):
+    """Validate stored evidence against current disk contents; never trust a claimed filename alone."""
+    if not isinstance(receipt_id, str) or len(receipt_id) != 32 or any(c not in '0123456789abcdef' for c in receipt_id):
+        raise ValueError('Invalid receipt id')
+    receipt = read_json(storelib.safe(root / '.receipts' / (receipt_id + '.json'), root))
+    if (not isinstance(receipt, dict) or receipt.get('version') != 1 or receipt.get('id') != receipt_id
+            or receipt.get('root') != str(root) or not isinstance(receipt.get('created_ns'), int)
+            or receipt['created_ns'] < since or receipt.get('operation') not in ('apply', 'verify')
+            or not isinstance(receipt.get('files'), dict) or not receipt['files']):
+        raise ValueError('Missing, stale or invalid memory evidence')
+    index = storelib.safe(root / 'MEMORY.md', root)
+    if index.stat().st_size > storelib.doctor.INDEX_READ_CAP:
+        raise ValueError('Index exceeds reading limit')
+    current_index = index.read_text(encoding='utf-8-sig')
+    if storelib.digest(current_index) != receipt['index_sha']:
+        # Other verified writes in this turn may add unrelated index entries.
+        # Revalidate current reachability instead of invalidating unchanged notes.
+        validate(notes(root), current_index)
+    verified = []
+    for relative, expected in receipt['files'].items():
+        target = receipt_path(root, relative)
+        if target.stat().st_size > storelib.doctor.NOTE_READ_CAP:
+            raise ValueError('Receipt note exceeds reading limit')
+        if storelib.digest(target.read_text(encoding='utf-8-sig')) != expected:
+            raise ValueError('Memory content changed after verification')
+        verified.append(str(target))
+    return verified
+
+
+def verify(root, names):
+    if not names:
+        raise ValueError('verify requires at least one --note relative/path.md')
+    paths = [note_path(root, name) for name in names]
+    evidence = issue_receipt(root, paths, 'verify')
+    return {'changed': False, 'verified_paths': list(map(str, paths)),
+            'contents': {name: path.read_text(encoding='utf-8-sig') for name, path in zip(names, paths)}, **evidence}
+
+
 def apply(root, plan, scope='project'):
     if not isinstance(plan, dict) or set(plan) != {'expected_revision', 'updates', 'retire'}:
         raise ValueError('Plan needs expected_revision, updates (path: content), retire (paths)')
@@ -271,20 +339,28 @@ def apply(root, plan, scope='project'):
     if changed or index_changed:
         storelib.atomic_write(root / '.transaction.json', payload)
         recover(root)
-    return {'changed': bool(changed or index_changed),
+    if notes(root) != final or (root / 'MEMORY.md').read_text(encoding='utf-8-sig') != index:
+        raise ValueError('Committed memory does not match the plan; do not claim success')
+    result = {'changed': bool(changed or index_changed),
             'paths': [str(root / n) if n in final else str(root / 'archive' / tx['id'] / n) for n in changed],
             'index': str(root / 'MEMORY.md'), 'revision': revision(root), 'checks': checks,
             'semantic_review_needed': facts['semantic_review_needed'],
             'notice_required': bool(changed or index_changed)}
+    proof_paths = result['paths'] + [str(root / n) for n in plan['updates'] if n not in changed]
+    if not proof_paths:
+        proof_paths = [str(root / 'MEMORY.md')]
+    result.update(issue_receipt(root, proof_paths, 'apply'))
+    return result
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path)
-    parser.add_argument('command', choices=['context', 'audit', 'apply'])
+    parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify'])
     parser.add_argument('--scope', choices=['project', 'global'], default='project')
     parser.add_argument('--plan', type=Path)
+    parser.add_argument('--note', action='append', default=[])
     args = parser.parse_args()
     try:
         with opened(args.config, args.project) as (_, project, roots):
@@ -292,6 +368,10 @@ def main():
                 if args.scope not in roots or args.plan is None:
                     raise ValueError('Missing plan or unavailable scope')
                 result = apply(roots[args.scope], read_json(args.plan), args.scope)
+            elif args.command == 'verify':
+                if args.scope not in roots:
+                    raise ValueError('Unavailable scope')
+                result = verify(roots[args.scope], args.note)
             else:
                 result = {'project': str(project), 'stores': context(roots)}
         print(json.dumps(result, ensure_ascii=True))

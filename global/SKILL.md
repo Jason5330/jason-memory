@@ -10,6 +10,9 @@ description: Use when working with Jason-memory Global Edition across local AI t
 先讀安裝後 `framework/docs/memory-runtime.md`。入口提供 runtime/config 絕對路徑。
 所有 AI 讀寫同一設定；相同事實搜尋全部相關筆記後批次 apply，不只改第一份。
 每次成功保存／更正／封存，在最終回覆末尾通知並連結實際路徑；讀取保持安靜。
+成功宣告須有本輪 apply／verify 工具回傳的驗證收據及實際內容，保留完整 JSON 輸出。
+既有偏好用 runtime --config CONFIG --project PROJECT_ROOT verify --scope SCOPE
+--note 相對筆記路徑 驗證即可，不為製造變更重寫；驗證失敗明說未保存。
 若專案有 `.jason-memory.json`，改用該專案設定；不並行操作另一套全局記憶。
 
 ## 第一則可見回覆前先召回
