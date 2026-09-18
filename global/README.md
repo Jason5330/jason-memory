@@ -74,7 +74,7 @@ python global/install.py --home "D:/JasonMemory" --agent both
 | 選項 | 安裝位置／做法 |
 |---|---|
 | `--agent codex` | 預設 `~/.codex/AGENTS.md`；存在非空的 `AGENTS.override.md` 時使用該檔案 |
-| `--agent claude` | 預設 `~/.claude/CLAUDE.md` |
+| `--agent claude` | 預設 `~/.claude/CLAUDE.md`，並合併 `~/.claude/settings.json` 的 Jason hooks |
 | `--agent both` | 安裝上述兩者，指向同一份記憶 |
 | `--agent generic` | 只安裝框架並產生 `GENERIC_INSTRUCTIONS.md`，不修改 AI 工具設定 |
 
@@ -129,4 +129,7 @@ python global/install.py --agent both --uninstall
 區分安裝器測試、真實 AI 共用測試與尚未涵蓋的宿主條件。
 
 [啟動匯入修補的測試與剩餘限制](https://github.com/Jason5330/jason-memory/blob/master/tests/recall-validation.md)。
-啟動匯入不保證模型每次完整遵守；本版未新增 hook 或執行攔截器。
+啟動匯入不保證模型每次完整遵守；本版提供 Claude hooks，仍不保證模型完全遵守。
+
+新版安裝會合併 Claude settings.json 的 Jason hooks，保留其他事件與既有記憶。
+跨筆記更正、版本交易及保存通知詳見 [runtime 協議](docs/memory-runtime.md)。

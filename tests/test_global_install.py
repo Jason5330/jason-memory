@@ -23,10 +23,12 @@ class GlobalInstallTests(unittest.TestCase):
         self.profile = self.base / "profile"
         self.home = self.base / "shared home"
         for relative in ("global/SKILL.md", "global/global_store.py", "templates/MEMORY.md",
-                         "tools/jason_check.py", "tools/jason_doctor.py"):
+                         "tools/jason_check.py", "tools/jason_doctor.py", "tools/memory_runtime.py",
+                         "tools/memory_facts.py", "tools/claude_memory_hook.py", "docs/memory-runtime.md"):
             path = self.package / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("fixture: " + relative, encoding="utf-8")
+        shutil.copyfile(ROOT / "tools/hook_settings.py", self.package / "tools/hook_settings.py")
         installer = ROOT / "global/install.py"
         if installer.exists():
             shutil.copyfile(installer, self.package / "global/install.py")
@@ -47,12 +49,33 @@ class GlobalInstallTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
 
+    def test_hooks_merge_idempotence_and_uninstall_preserve_foreign_settings(self):
+        target = self.profile / '.claude/settings.json'
+        settings = {'permissions': {'deny': ['Bash(rm:*)']}, 'hooks': {'Stop': [
+            {'hooks': [{'type': 'command', 'command': 'echo custom'}]}]}}
+        self.write_config(target, json.dumps(settings).encode())
+        self.run_install()
+        once = target.read_bytes()
+        data = json.loads(once)
+        self.assertEqual(len(data['hooks']['Stop']), 2)
+        self.assertEqual(len(data['hooks']['SessionStart']), 1)
+        self.run_install()
+        self.assertEqual(target.read_bytes(), once)
+        self.run_install('--uninstall')
+        self.assertEqual(json.loads(target.read_bytes()), settings)
+
+    def test_invalid_hook_settings_rejected_before_any_host_edits(self):
+        self.write_config(self.profile / '.claude/settings.json', b'{broken')
+        self.run_install(ok=False)
+        self.assertFalse((self.profile / '.codex/AGENTS.md').exists())
+        self.assertFalse(self.home.exists())
+
     def test_install_both_with_stable_absolute_paths_and_generic_export(self):
         self.run_install()
         for target in (self.profile / ".codex/AGENTS.md", self.profile / ".claude/CLAUDE.md"):
             data = target.read_text(encoding="utf-8")
             self.assertIn(str(self.home.resolve()).replace("\\", "\\\\"), data)
-            self.assertIn("context --project", data)
+            self.assertIn("--project ACTIVE_PROJECT_ROOT context", data)
             self.assertEqual(data.count(START.decode()), 1)
         self.assertTrue((self.home / "framework/global_store.py").is_file())
         self.assertTrue((self.home / "framework/tools/jason_check.py").is_file())

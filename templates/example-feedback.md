@@ -15,3 +15,7 @@ updated: 2026-06-13
 對使用者簡短說明實際結果即可，不必貼出每次搜尋輸出，也不延伸成 Git 提交提醒。
 
 相關：[[code-change-hygiene]]
+
+```jason-facts
+[{"subject":"agent:workflow","predicate":"completion.verification","value":"回報完成前驗證改動及相關行為"}]
+```

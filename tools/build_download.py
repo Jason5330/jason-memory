@@ -8,6 +8,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 ROOT = Path(__file__).resolve().parent.parent
 # Explicit files only: never scan the developer's working tree for release data.
 PACKAGE_FILES = (
+    '.jason-memory.json', '.claude/settings.json', 'INSTALL.cmd',
+    'tools/memory_facts.py', 'tools/memory_runtime.py', 'tools/claude_memory_hook.py',
+    'tools/hook_settings.py', 'tools/install_hooks.py', 'global/global_store.py',
+    'docs/memory-runtime.md', 'tests/test_memory_runtime.py', 'tests/hooks-validation.md',
     'START_HERE.md', 'README.md', 'AGENTS.md', 'CLAUDE.md', 'SKILL.md',
     'LICENSE', '.gitignore', 'templates/MEMORY.md',
     'templates/standing-rules.md', 'templates/example-feedback.md',

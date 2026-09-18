@@ -14,6 +14,15 @@ description: >-
 
 # Jason — curated file-based long-term memory
 
+## Runtime and hooks
+
+Read [the runtime protocol](docs/memory-runtime.md) before saving. All new writes
+use versioned batch apply through tools/memory_runtime.py and .jason-memory.json.
+Search all active notes for the same fact, preserve unrelated facts, and update
+all affected notes together. Add stable jason-facts metadata to new/corrected facts.
+Every successful memory change must end with a visible notice and actual note link.
+The runtime protocol supersedes older manual-write instructions below.
+
 ## Recall before the first visible reply
 
 For every message, including trivial questions, obtain the current full index
@@ -404,25 +413,22 @@ session. Before writing, run the checks in this order:
    Check relevant existing notes for the same superseded rule, and notify any
    change to the standing preference just as you would a memory change.
 
-3. **Write the file.** Pick the type, write a sharp `description`, fill the
+3. **Prepare a batch plan outside the store.** Pick the type, write a sharp `description`, fill the
    required fields for that type (Why/How for feedback & project; absolute dates
    for project), and link related memories with `[[...]]`.
 
-4. **Update the index.** Add one pointer line under the right type heading. Then
-   run the post-write checks in §6 and notify the user as described below.
+4. **Apply the plan with the runtime.** It derives the index from descriptions,
+   validates the complete store and runs both checkers. Notify the user after success.
 
 5. **Retire when wrong.** If a memory turns out to be false or obsolete, move
    it to `archive/`, remove its active pointer and record any replacement in a
    discoverable archive index (§6). Permanently delete only as directed by the
    user. Forgetting from active recall should preserve a recovery path.
 
-**Recovery discipline.** Before reorganizing or replacing existing notes, retain
-a local recoverable copy outside the active note graph. Validate the new note
-before updating its index pointer, then run both checkers. If interrupted, inspect
-the files and repair the index from the retained copy. This release has no
-transactional writer, journal, or multi-file atomic commit: two direct file writes
-are not a transaction, even with a single writer. Back up the store before bulk
-changes; the README describes explicit backup and transfer.
+**Recovery discipline.** Use the locked, versioned batch runtime. It validates all
+active notes and the generated index, archives preimages, and replays interrupted
+transactions before subsequent runtime reads. Direct/manual edits bypass this
+protection. See [runtime and recovery](docs/memory-runtime.md).
 
 ### Unified continuity sync
 
@@ -532,7 +538,7 @@ cannot meet it without losing useful context, explain the tradeoff.
 - Explicitly read the configured project-local index at task start unless its
   exact contents are already in context. Do not assume a native memory feature
   loads Jason's separate folder. Host-native storage is an explicit user choice,
-  subject to the ownership and single-writer conditions in §0.
+  subject to ownership and the runtime transaction protocol.
 - A plain chat interface with no agent/skill/file-access layer cannot run Jason:
   there is nothing to load the index or write the files. Jason needs a host that
   executes skills/rules and has file access.
@@ -557,23 +563,23 @@ Do not automatically commit every file as a substitute for stopping reminders.
 
 The standing rules guide recall, deduplication, writing and retirement; the
 agent must actually load and follow them. The read-only checkers validate size,
-structure and required text, not factual accuracy or semantic usefulness. No
-hook, host adapter or other write-time enforcement is included.
+structure and required text. The batch runtime additionally checks identified facts;
+Claude hooks refresh context and guard writes/notices. Neither guarantees arbitrary
+semantic correctness or model obedience.
 
 Put the recall instruction in the host's always-loaded project rules; the
 [installation template](templates/standing-rules.md) supplies it. This repository
 has [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) entrypoints. Do not assume native memory features
 load Jason's independent project folder or perform the curation pass.
 
-Jason assumes a single writer with serialized writes. There is no lock or
-multi-file transaction; concurrent edits can lose updates. Back up before bulk
-changes and check consistency after an interrupted write.
+All cooperating writers use the same runtime lock and revision checks. Manual
+writes bypass these guarantees. Back up before bulk changes.
 
 ## 9. Installation and upgrades
 
 Follow [README.md](README.md#安裝) to create the project store and install the
-standing rules. Python 3.9+ is needed for the two checkers. No host event
-registration is required.
+standing rules. Python 3.9+ is needed for the runtime, checkers and Claude hooks.
+Project INSTALL.cmd merges hooks into existing settings; global installation does likewise.
 
 When upgrading a previous installation, follow
 [the migration instructions](README.md#從舊版升級): remove only the old Jason index

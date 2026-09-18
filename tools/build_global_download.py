@@ -7,6 +7,12 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_FILES = {
+    'tools/memory_facts.py': 'tools/memory_facts.py',
+    'tools/memory_runtime.py': 'tools/memory_runtime.py',
+    'tools/claude_memory_hook.py': 'tools/claude_memory_hook.py',
+    'tools/hook_settings.py': 'tools/hook_settings.py',
+    'docs/memory-runtime.md': 'docs/memory-runtime.md',
+    'tests/hooks-validation.md': 'tests/hooks-validation.md',
     "global/README.md": "README.md",
     "global/INSTALL.cmd": "INSTALL.cmd",
     "LICENSE": "LICENSE",

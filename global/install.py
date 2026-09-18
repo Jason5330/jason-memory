@@ -7,12 +7,21 @@ from pathlib import Path
 import sys
 import tempfile
 import uuid
+import shlex
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+import hook_settings
 
 
 START = b"<!-- jason-memory-global:start -->"
 END = b"<!-- jason-memory-global:end -->"
 RECALL_V2 = b"<!-- jason-memory-global:recall-v2 -->"
 FILES = {
+    "docs/memory-runtime.md": "docs/memory-runtime.md",
+    "tools/memory_facts.py": "tools/memory_facts.py",
+    "tools/memory_runtime.py": "tools/memory_runtime.py",
+    "tools/claude_memory_hook.py": "tools/claude_memory_hook.py",
+    "tools/hook_settings.py": "tools/hook_settings.py",
     "global/SKILL.md": "SKILL.md",
     "global/global_store.py": "global_store.py",
     "templates/MEMORY.md": "templates/MEMORY.md",
@@ -56,7 +65,8 @@ def instructions(home, claude_dir=None):
     # These are JSON strings, not shell commands: agents must quote for their shell.
     paths = json.dumps({"memory_home": str(home),
                         "protocol": str(home / "framework/SKILL.md"),
-                        "runtime": str(home / "framework/global_store.py")},
+                        "runtime": str(home / "framework/tools/memory_runtime.py"),
+                        "config": str(home / "framework/memory-config.json")},
                        ensure_ascii=False, indent=2)
     return (
         "\n\n## Jason-memory: recall before any visible reply\n\n"
@@ -73,20 +83,22 @@ def instructions(home, claude_dir=None):
         "Read the installed protocol at the JSON `protocol` path at task start.\n"
         "Paths below are absolute JSON strings, not executable shell text:\n"
         "```json\n" + paths + "\n```\n"
-        "Use the runtime with arguments `--home MEMORY_HOME context --project ACTIVE_PROJECT_ROOT`\n"
+        "Use the runtime with arguments `--config CONFIG --project ACTIVE_PROJECT_ROOT context`\n"
         "and read BOTH the global index and this project's index plus relevant notes.\n"
         "Resolve ACTIVE_PROJECT_ROOT from the active workspace explicitly; never use the\n"
         "framework directory as the user's project. If unknown, ask before project access.\n"
         "Refresh context for every user message to see other AI writers' latest changes.\n"
-        "Use the protocol's read/save commands for memory changes. Every user message,\n"
+        "Use the protocol's versioned batch apply command for memory changes. Every user message,\n"
         "including follow-ups, requires fresh judgment of reusable requirements; a one-off\n"
         "task does not make later requirements one-off. Save clear reusable preferences\n"
         "without asking again, choose global/project scope carefully, and notify the user\n"
         "after a successful save with what, why, scope and note link. No change: stay quiet.\n"
         "The final save notice must include a clickable Markdown link to the returned\n"
         "absolute note path and the validation result; a bare filename is not a link.\n"
-        "Corrections reuse the existing note slug: read, then save with --expected-sha.\n"
-        "Do not add a replacement and retire the original for a same-fact correction.\n"
+        "Corrections search ALL related active notes, update every occurrence in one batch,\n"
+        "preserve unrelated facts, and apply with the current store expected_revision.\n"
+        "If the active project has .jason-memory.json, that explicit project configuration\n"
+        "takes precedence: use its runtime/context instead of a parallel global store.\n"
         "Stage input files in the active project, never inside the memory stores.\n"
         "Existing higher-priority or project-specific instructions still apply; report\n"
         "conflicts honestly, and do not rewrite those rules as part of installation.\n"
@@ -155,13 +167,29 @@ def main(argv=None):
                 edits.append((target, original, updated, target.exists()))
 
         copies = []
+        if args.agent in ('claude', 'both'):
+            settings = claude / 'settings.json'
+            if settings.is_symlink() or settings.resolve() != settings:
+                raise ValueError('Redirected Claude settings are not supported')
+            original = settings.read_bytes() if settings.exists() else b''
+            command = ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(),
+                              (home / 'framework/tools/claude_memory_hook.py').as_posix(),
+                              '--config', (home / 'framework/memory-config.json').as_posix(), '--jason-hook'))
+            updated = hook_settings.merged(original, None if args.uninstall else command)
+            if updated != original and (not args.uninstall or original):
+                edits.append((settings, original, updated, settings.exists()))
         index = home / "memory/shared/MEMORY.md"
         if not args.uninstall:
             source_root = Path(__file__).resolve().parents[1]
             # Read every source before changing any destination.
             for source, dest in FILES.items():
-                copies.append((home / "framework" / dest, (source_root / source).read_bytes()))
+                origin = source_root / source
+                if origin.is_symlink() or origin.resolve() != origin:
+                    raise ValueError('Redirected framework source: ' + str(origin))
+                copies.append((home / "framework" / dest, origin.read_bytes()))
             copies.append((home / "GENERIC_INSTRUCTIONS.md", block))
+            copies.append((home / 'framework/memory-config.json',
+                           b'{"version":1,"mode":"global","home":".."}\n'))
             if index.is_symlink() or index.resolve() != index:
                 raise ValueError("Redirected shared index is not supported: " + str(index))
             if index.exists() and not index.is_file():
@@ -171,6 +199,9 @@ def main(argv=None):
                 "copy": [str(item[0]) for item in copies],
                 "initialize_if_missing": [] if args.uninstall or index.exists() else [str(index)],
                 "memories_preserved": True}
+        for destination in [entry[0] for entry in edits] + [entry[0] for entry in copies]:
+            if destination.is_symlink() or destination.resolve() != destination:
+                raise ValueError('Redirected installation target: ' + str(destination))
         if not args.dry_run:
             for dest, data in copies:
                 if not dest.exists() or dest.read_bytes() != data:

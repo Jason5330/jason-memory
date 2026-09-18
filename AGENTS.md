@@ -1,5 +1,17 @@
 # Jason-memory — Codex 專案規則
 
+## 統一讀寫與通知（優先於下方手動流程）
+
+先讀 [runtime 協議](docs/memory-runtime.md)。每輪用
+`python tools/memory_runtime.py --config .jason-memory.json context` 取得同一記憶庫
+最新內容；Claude hook 已提供完整且未變更的正文時可重用，截斷時補讀。
+所有變更經 runtime 的 `apply --plan`，不直接 Write/Edit 筆記或索引。
+更正時搜尋所有相關筆記，批次更新同一事實，保留其他事實；新／更正事實加
+穩定的 `jason-facts` 識別欄位。每次新增、修改、封存成功後，在最終回覆末尾
+顯示「已將此要求記憶在……」，附實際絕對路徑的 Markdown 連結、範圍及健檢結果。
+失敗明說未保存；單純召回安靜執行，不輸出「我來讀記憶」等流程語言。
+
+
 ## 回覆前先召回
 
 每則使用者訊息，在第一則可見文字（含進度說明）前，先讀取目前的

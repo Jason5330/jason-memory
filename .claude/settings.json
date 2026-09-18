@@ -1,0 +1,61 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/tools/claude_memory_hook.py\" --config \"${CLAUDE_PROJECT_DIR}/.jason-memory.json\" --jason-hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/tools/claude_memory_hook.py\" --config \"${CLAUDE_PROJECT_DIR}/.jason-memory.json\" --jason-hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/tools/claude_memory_hook.py\" --config \"${CLAUDE_PROJECT_DIR}/.jason-memory.json\" --jason-hook",
+            "timeout": 15
+          }
+        ],
+        "matcher": "Read|Write|Edit|MultiEdit|Bash"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/tools/claude_memory_hook.py\" --config \"${CLAUDE_PROJECT_DIR}/.jason-memory.json\" --jason-hook",
+            "timeout": 15
+          }
+        ],
+        "matcher": "Read|Write|Edit|MultiEdit|Bash"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/tools/claude_memory_hook.py\" --config \"${CLAUDE_PROJECT_DIR}/.jason-memory.json\" --jason-hook",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

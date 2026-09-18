@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -57,6 +58,13 @@ class DownloadTest(unittest.TestCase):
                                         encoding='utf-8', timeout=15)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse((project / '.git').exists())
+            hook = subprocess.run([sys.executable, str(project / 'tools/claude_memory_hook.py'),
+                                   '--config', str(project / '.jason-memory.json'), '--jason-hook'],
+                                  input=json.dumps({'hook_event_name': 'SessionStart', 'session_id': 'zip-smoke',
+                                                    'cwd': str(project)}),
+                                  capture_output=True, text=True, encoding='utf-8')
+            self.assertEqual(hook.returncode, 0, hook.stderr)
+            self.assertIn('additionalContext', json.loads(hook.stdout)['hookSpecificOutput'])
             self.assertEqual((source / '.jason-memory/MEMORY.md').read_text(), private)
 
     def test_existing_output_is_preserved(self):

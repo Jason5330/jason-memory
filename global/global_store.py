@@ -22,6 +22,9 @@ spec.loader.exec_module(doctor)
 check_spec = importlib.util.spec_from_file_location('jason_check', ASSETS / 'tools/jason_check.py')
 check = importlib.util.module_from_spec(check_spec)
 check_spec.loader.exec_module(check)
+facts_spec = importlib.util.spec_from_file_location('memory_facts', ASSETS / 'tools/memory_facts.py')
+facts = importlib.util.module_from_spec(facts_spec)
+facts_spec.loader.exec_module(facts)
 
 
 def safe(path, root):
@@ -84,6 +87,8 @@ def slug_check(slug):
 
 
 def validate(store, slug, content, index, retire=False):
+    if (store / '.transaction.json').exists():
+        raise ValueError('Pending batch transaction: use memory_runtime.py context to recover first')
     slug_check(slug)
     if len(content.encode('utf-8')) > doctor.NOTE_READ_CAP:
         raise ValueError('Note exceeds validation limit')
@@ -105,6 +110,10 @@ def validate(store, slug, content, index, retire=False):
             atomic_write(stage / 'archive/MEMORY.md',archive_index.read_text(encoding='utf-8')
                          if archive_index.exists() else '# Archived memories\n')
         atomic_write(stage / 'MEMORY.md',index)
+        report = facts.audit({p.name: p.read_text(encoding='utf-8-sig') for p in stage.glob('*.md')
+                              if p.name != 'MEMORY.md'})
+        if report['conflicts'] or report['invalid_facts']:
+            raise ValueError('Fact conflict: use versioned batch apply to correct all related notes')
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             code = doctor.main(['doctor',str(stage)])

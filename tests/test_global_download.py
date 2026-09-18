@@ -11,6 +11,8 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
+    "tools/memory_facts.py", "tools/memory_runtime.py", "tools/claude_memory_hook.py",
+    "tools/hook_settings.py", "docs/memory-runtime.md", "tests/hooks-validation.md",
     "README.md", "INSTALL.cmd", "LICENSE", "global/install.py",
     "global/global_store.py", "global/SKILL.md", "templates/MEMORY.md",
     "tools/jason_check.py", "tools/jason_doctor.py",
@@ -100,6 +102,12 @@ class GlobalDownloadTests(unittest.TestCase):
                                 capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((home / "memory/shared/MEMORY.md").is_file())
+        modern = subprocess.run([sys.executable, str(home / 'framework/tools/memory_runtime.py'),
+                                '--config', str(home / 'framework/memory-config.json'),
+                                '--project', str(project), 'context'],
+                               capture_output=True, text=True, encoding='utf-8')
+        self.assertEqual(modern.returncode, 0, modern.stderr)
+        self.assertIn('semantic_review_needed', modern.stdout)
         note = home / "memory/shared/do-not-remove.md"
         note.write_text("user note", encoding="utf-8")
         result = subprocess.run(installer + ["--uninstall"], capture_output=True,

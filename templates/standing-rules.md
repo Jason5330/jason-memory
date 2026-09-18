@@ -58,3 +58,12 @@ python "<FRAMEWORK_ROOT>/tools/jason_doctor.py" "<MEMORY_ROOT>"
 記憶目錄的忽略設定；普通資料夾略過，不為此探測 Git。只有
 設定／路徑改變或出現誤追蹤跡象才重查。使用者要求 Git 工作，或當前任務確實
 需要 Git 操作時才執行；已授權的提交與推送直接完成，不再追加詢問。
+
+
+## 新版 runtime 與 hooks
+
+安裝時一併設定目標根目錄 `.jason-memory.json` 的 memory_root，讀寫都使用
+框架 tools/memory_runtime.py --config 目標設定檔；不要沿用第二套 `.ai-memory` 路徑。
+依 [runtime 協議](../docs/memory-runtime.md) 用批次 apply 更正所有相關筆記，
+每次成功變更在最終回覆末尾通知並連結實際筆記；正常讀取保持安靜。
+Claude 使用 tools/install_hooks.py --project 目標根目錄 合併事件，不覆蓋其他設定。
