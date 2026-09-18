@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -65,6 +66,11 @@ class DownloadTest(unittest.TestCase):
                                   capture_output=True, text=True, encoding='utf-8')
             self.assertEqual(hook.returncode, 0, hook.stderr)
             self.assertIn('additionalContext', json.loads(hook.stdout)['hookSpecificOutput'])
+            if os.name == 'nt':
+                launcher = subprocess.run(['cmd', '/d', '/c', str(project / 'INSTALL.cmd'), '--dry-run'],
+                                          capture_output=True, text=True, encoding='utf-8')
+                self.assertEqual(launcher.returncode, 0, launcher.stderr)
+                self.assertIn('"dry_run": true', launcher.stdout)
             self.assertEqual((source / '.jason-memory/MEMORY.md').read_text(), private)
 
     def test_existing_output_is_preserved(self):
