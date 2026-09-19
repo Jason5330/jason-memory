@@ -31,7 +31,7 @@
             "timeout": 15
           }
         ],
-        "matcher": "Read|Write|Edit|MultiEdit|Bash|PowerShell|powershell"
+        "matcher": "Read|Write|Edit|MultiEdit"
       }
     ],
     "PostToolUse": [
@@ -43,7 +43,7 @@
             "timeout": 15
           }
         ],
-        "matcher": "Read|Write|Edit|MultiEdit|Bash|PowerShell|powershell"
+        "matcher": "Bash|PowerShell|powershell"
       }
     ],
     "Stop": [

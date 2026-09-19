@@ -44,6 +44,110 @@ class RuntimeTests(unittest.TestCase):
     def event(self, name, **kwargs):
         return hook.handle({'hook_event_name': name, 'session_id': 'test', 'cwd': str(self.project), **kwargs}, self.config)
 
+    def test_remember_generates_valid_note_and_current_receipt_in_one_call(self):
+        self.event('SessionStart')
+        with runtime.opened(self.config):
+            saved = runtime.remember(self.root, 'user', 'response.order', '先結論，再細節', '使用者明確要求')
+        self.event('PostToolUse', tool_name='Bash', tool_response={'stdout': json.dumps(saved)})
+        self.assertTrue(saved['changed'])
+        self.assertIn('jason-facts', Path(saved['paths'][0]).read_text(encoding='utf-8'))
+        self.assertEqual(self.event('Stop', last_assistant_message=self.notice(Path(saved['paths'][0]))), {})
+
+    def test_remember_duplicate_verifies_without_rewriting_or_archiving(self):
+        with runtime.opened(self.config):
+            first = runtime.remember(self.root, 'user', 'response.order', '結論優先', '使用者要求')
+            path = Path(first['paths'][0]);mtime = path.stat().st_mtime_ns
+            second = runtime.remember(self.root, 'USER', 'Response.Order', '結論優先', '再次確認')
+        self.assertFalse(second['changed'])
+        self.assertEqual(path.stat().st_mtime_ns, mtime)
+        self.assertNotEqual(first['receipt'], second['receipt'])
+        self.assertFalse((self.root / 'archive').exists())
+
+    def test_remember_changed_fact_rejects_without_damaging_mixed_notes(self):
+        self.apply({'job.md': note('job', extra={'subject': 'user:anna', 'predicate': 'name', 'value': 'ANNA'})})
+        before = runtime.revision(self.root)
+        with runtime.opened(self.config), self.assertRaisesRegex(ValueError, 'batch-correct'):
+            runtime.remember(self.root, 'user:anna', 'occupation', 'teacher', 'Correction')
+        self.assertEqual(runtime.revision(self.root), before)
+
+    def test_remember_duplicate_checks_every_related_note(self):
+        self.apply({'one.md': note('one'), 'two.md': note('two')})
+        with runtime.opened(self.config):
+            saved = runtime.remember(self.root, 'user:anna', 'occupation', '醫生', 'Already known')
+        self.assertEqual(len(saved['verified_paths']), 2)
+        self.assertFalse(saved['changed'])
+
+    def test_remember_rejects_empty_or_multiline_input(self):
+        for value in ('', 'one\ntwo', '```jason-facts'):
+            with self.subTest(value=value), runtime.opened(self.config), self.assertRaises(ValueError):
+                runtime.remember(self.root, 'user', 'response.order', value, 'User request')
+        self.assertEqual(runtime.notes(self.root), {})
+
+    def test_batch_does_not_rewrite_unrelated_notes(self):
+        self.apply({'one.md': note('one'), 'two.md': note('two', subject='user:bob')})
+        timestamp = (self.root / 'two.md').stat().st_mtime_ns
+        self.apply({'one.md': note('one', 'teacher')})
+        self.assertEqual((self.root / 'two.md').stat().st_mtime_ns, timestamp)
+
+    def test_apply_validates_once_but_recovery_still_validates(self):
+        with patch.object(runtime, 'validate', wraps=runtime.validate) as validate:
+            self.apply({'one.md': note('one')})
+            self.assertEqual(validate.call_count, 1)
+
+    def test_ordinary_post_tools_do_not_scan_store_but_stop_catches_damage(self):
+        self.event('SessionStart')
+        with patch.object(runtime, 'context', side_effect=AssertionError('unnecessary scan')):
+            self.assertEqual(self.event('PostToolUse', tool_name='Read', tool_response={'content': 'report'}), {})
+            self.assertEqual(self.event('PostToolUse', tool_name='Bash', tool_response={'stdout': 'hello'}), {})
+        (self.root / 'broken.md').write_text('broken note', encoding='utf-8')
+        self.assertEqual(self.event('Stop', last_assistant_message='完成')['decision'], 'block')
+
+    def test_configured_framework_reads_allowed_parallel_stores_still_denied(self):
+        framework = self.project / '.jason-memory-global/framework'
+        (framework / 'tools').mkdir(parents=True)
+        with patch.object(runtime, '__file__', str(framework / 'tools/memory_runtime.py')):
+            for relative in ('SKILL.md', 'docs/memory-runtime.md', 'tools/memory_runtime.py'):
+                path = framework / relative;path.parent.mkdir(exist_ok=True);path.write_text('test', encoding='utf-8')
+                self.assertEqual(self.event('PreToolUse', tool_name='Read', tool_input={'file_path': str(path)}), {})
+            wrong = self.project / '.jason-memory-global/memory/other/MEMORY.md'
+            result = self.event('PreToolUse', tool_name='Read', tool_input={'file_path': str(wrong)})
+            self.assertEqual(result['hookSpecificOutput']['permissionDecision'], 'deny')
+
+    def test_cli_stdin_batch_and_utf8_on_ascii_console(self):
+        plan = {'expected_revision': runtime.revision(self.root), 'updates': {'job.md': note('job', body='醫生')}, 'retire': []}
+        import os
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/memory_runtime.py'), '--config', str(self.config),
+                                 'apply', '--plan', '-'], input=json.dumps(plan).encode('utf-8'), capture_output=True,
+                                env=dict(os.environ, PYTHONIOENCODING='ascii'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout.decode('utf-8'))
+        self.assertTrue(output['changed'])
+        self.assertNotIn(b'\\u2014', result.stdout)
+
+    def test_hook_matchers_avoid_unnecessary_shell_pre_and_read_post(self):
+        settings = json.loads(hook_settings.merged(b'', 'python claude_memory_hook.py --jason-hook'))
+        self.assertNotIn('Bash', settings['hooks']['PreToolUse'][0]['matcher'])
+        self.assertNotIn('Read', settings['hooks']['PostToolUse'][0]['matcher'])
+
+    def test_verified_notice_does_not_require_specific_success_vocabulary(self):
+        self.event('SessionStart')
+        self.apply({'job.md': note('job')})
+        reply = '已將「先結論再細節」設為全域偏好。\n驗證結果：儲存成功。\n筆記：[格式](' + str(self.root / 'job.md') + ')'
+        self.assertEqual(self.event('Stop', last_assistant_message=reply), {})
+
+    def test_fast_paths_preserve_index_reading_limit(self):
+        original = runtime.revision(self.root)
+        index = self.root / 'MEMORY.md'
+        index.write_bytes(index.read_bytes().replace(b'\n', b'\r\n'))
+        self.assertEqual(runtime.revision(self.root), original)
+        (self.root / 'MEMORY.md').write_text('x' * 101, encoding='utf-8')
+        with patch.object(runtime.storelib.doctor, 'INDEX_READ_CAP', 100):
+            for action in (lambda: runtime.revision(self.root),
+                           lambda: runtime.apply(self.root, {'expected_revision': 'stale', 'updates': {}, 'retire': []}),
+                           lambda: runtime.remember(self.root, 'user', 'order', 'conclusion-first', 'user request')):
+                with self.assertRaisesRegex(ValueError, 'Index exceeds'):
+                    action()
+
     def test_cross_note_partial_correction_rejected_batch_succeeds(self):
         extra = {'subject': 'user:anna', 'predicate': 'preferred-name', 'value': 'ANNA'}
         self.apply({'job.md': note('job', 'teacher'), 'name.md': note('name', 'teacher', extra=extra)})

@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import sys
 import time
 from urllib.parse import unquote
@@ -41,12 +42,23 @@ def render(snapshot, config, project, limit=LIMIT):
             'search ALL active notes for the same subject/fact and batch-correct every occurrence, '
             'preserving unrelated facts. After EACH successful change finish with a user-visible '
             'notice describing the change and a clickable absolute note link; failure means not saved. '
-            'A success claim needs an apply/verify receipt from a successful tool call this turn. '
+            'This snapshot satisfies recall: reuse complete notes here; do not run context or read SKILL.md again. '
+            'Simple new single facts: ONE remember call generates metadata, checks, index and receipt. '
+            'Reuse existing subject/key identifiers; for corrections/mixed notes use batch apply --plan - from stdin. '
+            'No separate plan file, doctor, check or verify after a successful save. '
+            'A success claim needs an apply/remember/verify receipt from a successful tool call this turn. '
             'For an existing unchanged preference, run runtime verify --scope SCOPE --note RELATIVE_NOTE; '
             'never claim a save from an empty index, a proposed plan or a filename alone. '
             'Never announce routine memory reading. Archives are not current facts.\n'
             + 'Config: ' + str(config) + '\nActive project: ' + str(project) + '\n')
     head += 'Runtime: ' + str(Path(runtime.__file__).resolve()) + '\n'
+    command = ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(),
+                      Path(runtime.__file__).resolve().as_posix(), '--config', Path(config).as_posix(),
+                      '--project', Path(project).as_posix()))
+    head += ('Command prefix (Bash): ' + command + '\n'
+             'Append: remember --scope project --subject user --key STABLE_KEY --value "REQUIREMENT" --why "USER_EVIDENCE"\n'
+             'Use global scope only for clearly cross-project preferences; otherwise project. '
+             'Only complex batch corrections need docs/memory-runtime.md.\n')
     parts = [head]
     omitted = []
     ordered_notes = []
@@ -193,6 +205,13 @@ def handle(event, config):
     name = event.get('hook_event_name')
     if name not in EVENTS:
         return {}
+    if name == 'PostToolUse':
+        output = event.get('tool_response', {})
+        failed = isinstance(output, dict) and (output.get('interrupted') or output.get('isError') or
+                  output.get('exitCode', output.get('exit_code', 0)) not in (0, None))
+        handles = tool_receipts(output)
+        if failed or event.get('tool_name') not in ('Bash', 'PowerShell', 'powershell') or not handles:
+            return {}  # Stop still audits the store; ordinary tools need no full-store pass.
     cwd = Path(event.get('cwd') or os.getcwd()).resolve()
     cfg, _, _, initial_roots = runtime.configuration(config, cwd)
     local = active_project(cwd)
@@ -215,6 +234,13 @@ def handle(event, config):
             path = data.get('file_path') or data.get('path')
             if path:
                 path = str(cwd / path) if not Path(path).is_absolute() else path
+                framework = Path(runtime.__file__).resolve().parents[1]
+                if tool == 'Read' and protected(path, {'framework': framework}):
+                    candidate = runtime.storelib.safe(Path(os.path.abspath(path)), framework)
+                    relative = candidate.relative_to(framework)
+                    if relative.parts and (relative.parts[0] in ('tools', 'docs', 'templates', 'global')
+                                           or relative.as_posix() in ('SKILL.md', 'README.md', 'memory-config.json')):
+                        return {}  # Installed protocol/code is not a parallel memory store.
                 if parallel_memory(path) and not protected(path, roots):
                     return deny('Memory path mismatch. Use only configured roots: ' + ', '.join(map(str, roots.values())))
                 if protected(path, roots) and tool in ('Write', 'Edit', 'MultiEdit', 'NotebookEdit'):
@@ -222,12 +248,26 @@ def handle(event, config):
                                 'Direct memory writes cannot keep cross-note corrections and the index consistent.')
             # Shell programs can write arbitrary paths; this is a workflow guard, not a sandbox.
             return {}
-        snapshot = runtime.context(roots)
         state_root = next(iter(roots.values())) / '.hook-state'
         runtime.storelib.safe(state_root, next(iter(roots.values())))
         state_root.mkdir(exist_ok=True)
         state_path = runtime.storelib.safe(state_root / (session + '.json'), state_root)
         state = runtime.read_json(state_path) if state_path.exists() else {}
+        if name == 'PostToolUse':
+            if state:
+                for handle in handles:
+                    for root in roots.values():
+                        if handle.get('receipt_root') != str(root):
+                            continue
+                        try:
+                            runtime.check_receipt(root, handle['receipt'], state.get('turn_started_ns', time.time_ns()))
+                            state.setdefault('receipts', []).append({'receipt': handle['receipt'], 'receipt_root': str(root)})
+                        except (OSError, ValueError, KeyError, TypeError):
+                            pass
+                state['receipts'] = state.get('receipts', [])[-128:]
+                runtime.storelib.atomic_write(state_path, json.dumps(state))
+            return {}
+        snapshot = runtime.context(roots)
         versions = {s: i['revision'] for s, i in snapshot.items()}
         current_files = {str(Path(i['root']) / p): runtime.storelib.digest(t)
                          for i in snapshot.values() for p, t in i['notes'].items()}
@@ -239,24 +279,6 @@ def handle(event, config):
             return additional(name, render(snapshot, config, project)) if changed else {}
         problems = {s: i['audit'] for s, i in snapshot.items()
                     if i['audit']['conflicts'] or i['audit']['invalid_facts'] or i['audit'].get('structural_errors')}
-        if name == 'PostToolUse':
-            output = event.get('tool_response', {})
-            failed = isinstance(output, dict) and (output.get('interrupted') or output.get('isError') or
-                      output.get('exitCode', output.get('exit_code', 0)) not in (0, None))
-            if state and not failed and event.get('tool_name') in ('Bash', 'PowerShell', 'powershell'):
-                for handle in tool_receipts(output):
-                    for root in roots.values():
-                        if handle.get('receipt_root') != str(root):
-                            continue
-                        try:
-                            runtime.check_receipt(root, handle['receipt'], state.get('turn_started_ns', time.time_ns()))
-                            state.setdefault('receipts', []).append({'receipt': handle['receipt'], 'receipt_root': str(root)})
-                        except (OSError, ValueError, KeyError, TypeError):
-                            pass
-                state['receipts'] = state.get('receipts', [])[-128:]
-                runtime.storelib.atomic_write(state_path, json.dumps(state))
-            return additional(name, 'Memory conflict detected; do not claim success. Batch-correct related notes. '
-                              + json.dumps(problems, ensure_ascii=False)[:3000]) if problems else {}
         previous = state.get('files', {})
         changed_paths = sorted(p for p in set(previous) | set(current_files) if previous.get(p) != current_files.get(p)) if state else []
         if state and versions != state.get('versions') and not changed_paths:
@@ -265,9 +287,12 @@ def handle(event, config):
         state.setdefault('turn_started_ns', time.time_ns())
         state.setdefault('project_root', str(project))
         notice = success_claim(response)
-        unsupported_claim = notice and not verified_claim(response, state, roots)
+        evidence = verified_claim(response, state, roots) if notice or changed_paths else False
+        unsupported_claim = notice and not evidence
         linked = notice_links(response, changed_paths, previous, roots)
-        needs_notice = bool(changed_paths) and not (notice and linked)
+        # A real receipt + links to ALL changed notes proves the notification, even
+        # when the model uses another natural phrasing such as "設為全域偏好".
+        needs_notice = bool(changed_paths) and not (evidence and linked)
         if not problems and not needs_notice and not unsupported_claim:
             return {}
         if event.get('stop_hook_active') or state.get('retried'):

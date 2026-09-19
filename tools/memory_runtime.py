@@ -2,6 +2,7 @@
 """Canonical Markdown memory with versioned, recoverable multi-note transactions."""
 import argparse
 import contextlib
+from datetime import date
 import hashlib
 import importlib.util
 import io
@@ -99,12 +100,21 @@ def notes(root):
     return result
 
 
-def revision(root):
+def read_index(root):
     index = storelib.safe(root / 'MEMORY.md', root)
-    if index.stat().st_size > storelib.doctor.INDEX_READ_CAP:
+    with index.open('rb') as stream:
+        raw = stream.read(storelib.doctor.INDEX_READ_CAP + 1)
+    if len(raw) > storelib.doctor.INDEX_READ_CAP:
         raise ValueError('Index exceeds reading limit')
-    data = {'notes': notes(root), 'index': index.read_text(encoding='utf-8-sig')}
-    return storelib.digest(json.dumps(data, sort_keys=True, ensure_ascii=False))
+    return raw.decode('utf-8-sig').replace('\r\n', '\n').replace('\r', '\n')
+
+
+def revision(root):
+    return revision_for(notes(root), read_index(root))
+
+
+def revision_for(data, index):
+    return storelib.digest(json.dumps({'notes': data, 'index': index}, sort_keys=True, ensure_ascii=False))
 
 
 def index_for(data, archived=False):
@@ -148,7 +158,7 @@ def validate(data, index):
     return output.getvalue().strip(), facts
 
 
-def recover(root):
+def recover(root, _prepared=None):
     journal = storelib.safe(root / '.transaction.json', root)
     if not journal.exists():
         return
@@ -170,7 +180,8 @@ def recover(root):
     expected_index = index_for(tx['notes'], bool(tx['before']) or (root / 'archive/MEMORY.md').exists())
     if tx['index'] != expected_index:
         raise ValueError('Journal index does not match final notes')
-    validate(tx['notes'], tx['index'])
+    if tx != _prepared:
+        validate(tx['notes'], tx['index'])
     # Readers using this runtime hold the same lock and finish this replay before reading.
     for name, content in tx['before'].items():
         target = storelib.safe(root / 'archive' / tx['id'] / name, root)
@@ -183,7 +194,8 @@ def recover(root):
     for name, content in tx['notes'].items():
         target = note_path(root, name)
         target.parent.mkdir(parents=True, exist_ok=True)
-        storelib.atomic_write(target, content)
+        if not target.exists() or target.read_text(encoding='utf-8-sig') != content:
+            storelib.atomic_write(target, content)
     for name in tx['remove']:
         target = note_path(root, name)
         if target.exists():
@@ -217,8 +229,9 @@ def context(roots):
             code = storelib.doctor.main(['doctor', str(root)])
             size = storelib.check.main(['check', str(root / 'MEMORY.md')])
         report['structural_errors'] = output.getvalue().strip() if code or size else ''
-        result[scope] = {'root': str(root), 'revision': revision(root),
-                         'index': (root / 'MEMORY.md').read_text(encoding='utf-8-sig'),
+        index = read_index(root)
+        result[scope] = {'root': str(root), 'revision': revision_for(data, index),
+                         'index': index,
                          'notes': data, 'audit': report}
     return result
 
@@ -231,11 +244,12 @@ def receipt_path(root, relative):
     return storelib.safe(root / part, root)
 
 
-def issue_receipt(root, paths, operation):
+def issue_receipt(root, paths, operation, _validated=None):
     """Issue evidence only after reading the committed files back under the store lock."""
     data = notes(root)
-    index = (root / 'MEMORY.md').read_text(encoding='utf-8-sig')
-    validate(data, index)
+    index = read_index(root)
+    if _validated != (data, index):
+        validate(data, index)
     files = {}
     for path in paths:
         relative = Path(path).relative_to(root).as_posix()
@@ -262,10 +276,7 @@ def check_receipt(root, receipt_id, since=0):
             or receipt['created_ns'] < since or receipt.get('operation') not in ('apply', 'verify')
             or not isinstance(receipt.get('files'), dict) or not receipt['files']):
         raise ValueError('Missing, stale or invalid memory evidence')
-    index = storelib.safe(root / 'MEMORY.md', root)
-    if index.stat().st_size > storelib.doctor.INDEX_READ_CAP:
-        raise ValueError('Index exceeds reading limit')
-    current_index = index.read_text(encoding='utf-8-sig')
+    current_index = read_index(root)
     if storelib.digest(current_index) != receipt['index_sha']:
         # Other verified writes in this turn may add unrelated index entries.
         # Revalidate current reachability instead of invalidating unchanged notes.
@@ -293,9 +304,10 @@ def verify(root, names):
 def apply(root, plan, scope='project'):
     if not isinstance(plan, dict) or set(plan) != {'expected_revision', 'updates', 'retire'}:
         raise ValueError('Plan needs expected_revision, updates (path: content), retire (paths)')
-    if plan['expected_revision'] != revision(root):
-        raise ValueError('Revision conflict: refresh context and rebase all related corrections')
     old = notes(root)
+    old_index = read_index(root)
+    if plan['expected_revision'] != revision_for(old, old_index):
+        raise ValueError('Revision conflict: refresh context and rebase all related corrections')
     final = dict(old)
     if not isinstance(plan['updates'], dict) or not isinstance(plan['retire'], list):
         raise ValueError('Invalid updates/retire plan')
@@ -335,49 +347,109 @@ def apply(root, plan, scope='project'):
     payload = json.dumps(tx, ensure_ascii=False)
     if len(payload.encode('utf-8')) > MAX_BYTES:
         raise ValueError('Transaction exceeds size limit')
-    index_changed = (root / 'MEMORY.md').read_text(encoding='utf-8-sig') != index
+    index_changed = old_index != index
     if changed or index_changed:
         storelib.atomic_write(root / '.transaction.json', payload)
-        recover(root)
-    if notes(root) != final or (root / 'MEMORY.md').read_text(encoding='utf-8-sig') != index:
+        recover(root, _prepared=tx)
+    if notes(root) != final or read_index(root) != index:
         raise ValueError('Committed memory does not match the plan; do not claim success')
     result = {'changed': bool(changed or index_changed),
             'paths': [str(root / n) if n in final else str(root / 'archive' / tx['id'] / n) for n in changed],
-            'index': str(root / 'MEMORY.md'), 'revision': revision(root), 'checks': checks,
+            'index': str(root / 'MEMORY.md'), 'revision': revision_for(final, index), 'checks': checks,
             'semantic_review_needed': facts['semantic_review_needed'],
             'notice_required': bool(changed or index_changed)}
     proof_paths = result['paths'] + [str(root / n) for n in plan['updates'] if n not in changed]
     if not proof_paths:
         proof_paths = [str(root / 'MEMORY.md')]
-    result.update(issue_receipt(root, proof_paths, 'apply'))
+    result.update(issue_receipt(root, proof_paths, 'apply', _validated=(final, index)))
     return result
+
+
+def remember(root, subject, key, value, why, scope='project'):
+    """Single-call add/verify. Corrections retain the explicit batch review path."""
+    if not all(isinstance(v, str) and v.strip() for v in (subject, key, value, why)):
+        raise ValueError('remember requires nonempty --subject, --key, --value and --why')
+    if any('\n' in v or '\r' in v or '```' in v for v in (subject, key, value, why)):
+        raise ValueError('remember accepts single-line facts; use apply for complex notes')
+    subject, key = memory_facts.canonical(subject), memory_facts.canonical(key)
+    data = notes(root)
+    matches = []
+    wanted = memory_facts.canonical(value) if key == 'occupation' else value
+    for name, content in data.items():
+        facts, _ = memory_facts.extract(content)
+        for s, p, v in facts:
+            if (s, p) == (subject, key):
+                if v != wanted:
+                    raise ValueError('Existing fact differs: use context and apply to batch-correct related notes, preserving other facts: ' + name)
+                matches.append(name)
+    if matches:
+        return verify(root, sorted(set(matches)))
+    slug = 'preference-' + hashlib.sha256((subject + '\0' + key).encode('utf-8')).hexdigest()[:16]
+    name = 'feedback/' + slug + '.md'
+    if name in data:
+        raise ValueError('Existing note path needs manual batch review; do not overwrite: ' + name)
+    today = date.today().isoformat()
+    # JSON strings are valid quoted YAML scalar values; no hand-written metadata required.
+    description = json.dumps(value, ensure_ascii=False)
+    content = ('---\nname: ' + slug + '\ndescription: ' + description + '\ntype: feedback\n'
+               'created: ' + today + '\nupdated: ' + today + '\n---\n\n' + value + '\n\nWhy: ' + why +
+               '\n\nHow to apply: ' + ('全局共用' if scope == 'global' else '本專案') + '；' + value +
+               '\n\n```jason-facts\n' + json.dumps([{'subject': subject, 'predicate': key, 'value': value}], ensure_ascii=False) + '\n```\n')
+    index = read_index(root)
+    result = apply(root, {'expected_revision': revision_for(data, index), 'updates': {name: content}, 'retire': []}, scope)
+    result['saved_fact'] = {'subject': subject, 'predicate': key, 'value': value}
+    return result
+
+
+def emit_json(result, stream=None):
+    stream = stream or sys.stdout
+    raw = json.dumps(result, ensure_ascii=False) + '\n'
+    if hasattr(stream, 'buffer'):
+        stream.buffer.write(raw.encode('utf-8'))
+    else:
+        stream.write(raw)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path)
-    parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify'])
+    parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify', 'remember'])
     parser.add_argument('--scope', choices=['project', 'global'], default='project')
     parser.add_argument('--plan', type=Path)
     parser.add_argument('--note', action='append', default=[])
+    parser.add_argument('--subject')
+    parser.add_argument('--key')
+    parser.add_argument('--value')
+    parser.add_argument('--why')
     args = parser.parse_args()
     try:
         with opened(args.config, args.project) as (_, project, roots):
             if args.command == 'apply':
                 if args.scope not in roots or args.plan is None:
                     raise ValueError('Missing plan or unavailable scope')
-                result = apply(roots[args.scope], read_json(args.plan), args.scope)
+                if str(args.plan) == '-':
+                    raw = sys.stdin.buffer.read(MAX_BYTES + 1)
+                    if len(raw) > MAX_BYTES:
+                        raise ValueError('Plan exceeds reading limit')
+                    plan = json.loads(raw.decode('utf-8-sig'))
+                else:
+                    plan = read_json(args.plan)
+                result = apply(roots[args.scope], plan, args.scope)
+            elif args.command == 'remember':
+                if args.scope not in roots:
+                    raise ValueError('Unavailable scope')
+                result = remember(roots[args.scope], args.subject, args.key, args.value, args.why, args.scope)
             elif args.command == 'verify':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')
                 result = verify(roots[args.scope], args.note)
             else:
                 result = {'project': str(project), 'stores': context(roots)}
-        print(json.dumps(result, ensure_ascii=True))
+        emit_json(result)
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        print(json.dumps({'error': str(exc)}, ensure_ascii=True), file=sys.stderr)
+        emit_json({'error': str(exc)}, sys.stderr)
         return 1
 
 

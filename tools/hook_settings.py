@@ -27,8 +27,10 @@ def merged(original, command=None):
                 retained.append(group)
         if command:
             group = {'hooks': [{'type': 'command', 'command': command, 'timeout': 15}]}
-            if name in ('PreToolUse', 'PostToolUse'):
-                group['matcher'] = 'Read|Write|Edit|MultiEdit|Bash|PowerShell|powershell'
+            if name == 'PreToolUse':
+                group['matcher'] = 'Read|Write|Edit|MultiEdit'
+            elif name == 'PostToolUse':
+                group['matcher'] = 'Bash|PowerShell|powershell'
             retained.append(group)
         if retained:
             hooks[name] = retained

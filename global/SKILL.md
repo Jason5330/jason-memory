@@ -3,6 +3,19 @@ name: jason-global
 description: Use when working with Jason-memory Global Edition across local AI tools, recalling user preferences, assessing each new user message, or saving verified reusable lessons with global or project scope.
 ---
 
+## 日常快速流程（優先於下方詳細協議）
+
+入口／Claude hook 已提供完整最新筆記時直接重用；未變更不再跑 context、讀本說明
+或健檢。缺少／截斷時才 context 補讀；沒有 hook 的宿主每輪 context。
+一項新偏好用 runtime 的 remember --scope SCOPE --subject user --key STABLE_KEY
+--value "完整要求" --why "使用者依據"；沿用既有事實鍵，不猜測不同鍵沒有重複。
+工具自動產生 Markdown、jason-facts、索引，驗證並回傳收據；同鍵同值只驗證。
+成功後一句保存通知含實際絕對筆記連結、範圍及健檢結果，不再跑 doctor/check/verify。
+值不同或混合事實的更正才讀詳細 runtime 協議，用 apply --plan - 從 stdin 一次
+更正全部相關筆記，保留其他事實；不需建立再刪除暫存 plan。失敗明說未保存。
+以下為進階參考，不要求在簡單偏好保存前逐節閱讀，也不要求重複執行工具內已完成的健檢。
+
+
 # Jason-memory 全局共用協議
 
 ## 統一 runtime（取代舊版單檔寫入流程）

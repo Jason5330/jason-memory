@@ -1,5 +1,15 @@
 ## 記憶（Jason-memory）
 
+### 日常快速流程（優先於下方詳細流程）
+
+Claude hook 已提供完整最新筆記時直接重用；hook 未通知變更且正文仍在上下文時
+不再 context、讀 SKILL.md 或健檢。缺少／截斷時才補讀；其他宿主每輪 context。
+一項新的簡單偏好，用框架 tools/memory_runtime.py --config 目標設定檔 remember
+--scope project --subject user --key STABLE_KEY --value "完整要求" --why "使用者依據"。
+沿用目前筆記的事實鍵；工具自動生成欄位、健檢、索引及收據，不再另外 verify。
+更正現有值、混合事實與舊筆記才讀完整協議，用 apply --plan - 批次處理；
+保留其他事實，不用暫存計畫檔。成功後一句通知含實際筆記連結、範圍與結果。
+
 ### 回覆前先召回（此節放在記憶入口最前面）
 
 每則使用者訊息，在第一則可見文字（含進度說明）前，先取得目前完整索引

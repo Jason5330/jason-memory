@@ -5,6 +5,26 @@
 `.jason-memory-global/memory/shared` 及 `memory/projects/<專案雜湊>`。
 不需 Git，不清空舊記憶，也不把記憶搬到 Claude 原生 auto-memory。
 
+## 日常快速流程
+
+Claude hook 已提供完整最新正文時直接使用，不重新讀 SKILL.md、查 --help 或跑 context。
+後續沒有變更且已載入正文仍在上下文時可重用；截斷／未注入／無 hook 才 context 補讀。
+一項明確的新偏好，先對照已載入筆記、沿用事實鍵，再一次呼叫：
+
+```text
+python tools/memory_runtime.py --config .jason-memory.json remember --scope project --subject user --key response.order --value "回報先列結論，再列細節" --why "使用者明確要求"
+```
+
+範例不是預載偏好。全局版替換成入口的 runtime/config，帶實際 --project；明確跨專案
+才用 --scope global。指令產生 Markdown、日期及 jason-facts，完成索引、健檢、讀回
+與收據；不用另建／刪除 plan、再跑 doctor/check/verify。輸出直接使用 UTF-8 中文，
+不把每個中文字展開成六個 ASCII 字元。保留 JSON 收據並用一句話通知實際路徑及範圍。
+
+同鍵同值已存在時只驗證，筆記不重寫；同鍵不同值會拒絕快速新增，要求用下面的
+批次流程更正全部相關筆記、保留其他事實與舊正文。未知別名、舊筆記中的未結構化
+事實仍需 AI 對照，快速指令不會自動理解語意或覆寫混合筆記。
+複雜批次可用 `apply --plan -` 從 stdin 傳 JSON，不必寫暫存檔；原有 --plan 檔案仍可用。
+
 ## 唯一路徑與每輪召回
 
 專案版以根目錄 `.jason-memory.json` 指定 `memory_root`；全局版安裝時產生
@@ -13,7 +33,7 @@
 同時安裝兩版時，明確的專案 `.jason-memory.json` 優先，全局 hook 在該專案
 略過，不同時注入另一套記憶。既有 `.ai-memory` 不會自動猜測、搬移或刪除。
 
-每則訊息先取得最新 `context`。Claude hook 已完整提供且未變更的正文可重用；
+每則訊息先取得最新內容。沒有 hook 時執行 `context`；Claude hook 已完整提供且未變更的正文可重用；
 若標示 PARTIAL SNAPSHOT，仍須讀取遺漏的相關筆記才回覆。正常讀取不通報。
 hook 注入內容不是對話文字，但仍占上下文 token；超過 8,000 字元明確標示省略。
 
@@ -100,7 +120,7 @@ Claude 的 PostToolUse 只接收宿主工具輸出的收據；Stop 再核對本�
 | SessionStart（包括 compact） | 從設定路徑載入最新筆記正文，供第一句回覆前使用 |
 | UserPromptSubmit | 每輪檢查版本；另一個 AI 改動後重新注入最新有效記憶 |
 | PreToolUse | 拒絕可辨識的平行記憶路徑、Write/Edit 直接改庫，要求經 runtime 寫入 |
-| PostToolUse | 收集成功工具回傳且符合磁碟內容的本輪收據；回饋可辨識的事實衝突 |
+| PostToolUse | 只處理 shell 回傳的收據，普通讀檔與無收據的工具不掃描整庫；全庫衝突在寫入與 Stop 檢查 |
 | Stop | 檢查有變更卻沒通知，以及無證據卻宣稱已保存；要求補處理一次，仍失敗則停止並顯示驗證失敗警告 |
 
 專案 ZIP 附 `.claude/settings.json`，需要 shell 能找到 Python 3.9+。
@@ -120,6 +140,8 @@ Codex 及其他 AI 沿常駐規則呼叫同一 runtime；這套 Claude 事件不
 - 使用 runtime 的同庫操作經 OS 檔案鎖、整庫樂觀版本及可重播交易保護。
   中斷後下一次 runtime 操作先恢復，再讀取；磁碟多檔案替換本身不是一次原子操作。
   手動編輯、直接 shell 寫入、舊工具讀取不享有一致快照保證。共享網路磁碟不在驗證範圍。
+- 正常保存只做一次整庫驗證，重用同一次鎖內已驗證的計畫；仍讀回比對實際結果。
+  中斷後獨立重播 journal 時重新驗證，不信任舊的程序狀態；未變更筆記不重寫。
 - 每次改動保留舊正文於 archive，索引由新 description 產生。歷史不是現行要求。
   備份不等於加密；不保存密碼等機密值，不自動雲端同步。
 - 事實識別欄位能確定性檢出同鍵不同值；另有少量舊中文職業敘述辨識。
