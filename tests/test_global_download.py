@@ -11,6 +11,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
+    "UNINSTALL.bat", "tools/purge_memory.py", "docs/uninstall.md", "uninstall-manifest.json",
     "tools/memory_facts.py", "tools/memory_runtime.py", "tools/claude_memory_hook.py",
     "tools/hook_settings.py", "docs/memory-runtime.md", "tests/hooks-validation.md",
     "README.md", "INSTALL.cmd", "LICENSE", "global/install.py",

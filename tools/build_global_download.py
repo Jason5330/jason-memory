@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """Build the separate global-memory ZIP from an explicit public-file allowlist."""
 import argparse
+import hashlib
+import json
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_FILES = {
+    'UNINSTALL.bat': 'UNINSTALL.bat',
+    'tools/purge_memory.py': 'tools/purge_memory.py',
+    'docs/uninstall.md': 'docs/uninstall.md',
     'tools/memory_facts.py': 'tools/memory_facts.py',
     'tools/memory_runtime.py': 'tools/memory_runtime.py',
     'tools/claude_memory_hook.py': 'tools/claude_memory_hook.py',
@@ -36,6 +41,11 @@ def build(output, source=ROOT):
         if output.resolve() == path:
             raise ValueError("Output must not replace a package source")
         payload.append((archive_name, path.read_bytes()))
+    payload.append(('uninstall-manifest.json', json.dumps({
+        'format': 'jason-memory-package-v1',
+        'files': {name: hashlib.sha256(content.replace(b'\r\n', b'\n')).hexdigest()
+                  for name, content in payload},
+    }, indent=2).encode('utf-8')))
     # Read and validate all source files before creating the output directory.
     output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(output, "x", compression=ZIP_DEFLATED) as archive:

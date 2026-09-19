@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build a clean ready-to-use ZIP without Git, personal notes or local artifacts."""
 import argparse
+import hashlib
+import json
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -8,6 +10,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 ROOT = Path(__file__).resolve().parent.parent
 # Explicit files only: never scan the developer's working tree for release data.
 PACKAGE_FILES = (
+    'UNINSTALL.bat', 'tools/purge_memory.py', 'docs/uninstall.md',
     '.jason-memory.json', '.claude/settings.json', 'INSTALL.cmd',
     'tools/memory_facts.py', 'tools/memory_runtime.py', 'tools/claude_memory_hook.py',
     'tools/hook_settings.py', 'tools/install_hooks.py', 'global/global_store.py',
@@ -35,6 +38,11 @@ def build(output, source=ROOT):
         if output == path:
             raise ValueError('Output must not replace a package source')
         payload.append((name, path.read_bytes()))
+    payload.append(('uninstall-manifest.json', json.dumps({
+        'format': 'jason-memory-package-v1',
+        'files': {name: hashlib.sha256(content.replace(b'\r\n', b'\n')).hexdigest()
+                  for name, content in payload},
+    }, indent=2).encode('utf-8')))
     # Always use the pristine template, never the maintainer's real memory store.
     payload.append(('.jason-memory/MEMORY.md', dict(payload)['templates/MEMORY.md']))
     output.parent.mkdir(parents=True, exist_ok=True)
