@@ -1,0 +1,104 @@
+{
+  "executed": true,
+  "launcher_exit_code": 0,
+  "deleted_files_verified": 103,
+  "preserved_settings_verified": 2,
+  "project": "<PROJECT_ROOT>",
+  "global_homes": [
+    "<USER_HOME>\\.jason-memory-global"
+  ],
+  "memory_and_framework_directories_absent": true,
+  "unrelated_workbook_unchanged": true,
+  "errors": [],
+  "retained_by_design": [
+    "Cleanup utility",
+    "dist release/test artifacts",
+    ".git history",
+    "Other projects and AI chat histories"
+  ],
+  "independent_audit": {
+    "active_host_rule_checks": [
+      {
+        "file": "<USER_HOME>\\.claude\\CLAUDE.md",
+        "remaining_framework_reference_lines": []
+      },
+      {
+        "file": "<USER_HOME>\\.claude\\settings.json",
+        "remaining_framework_reference_lines": []
+      }
+    ],
+    "global_home_exists": false,
+    "project_memory_exists": false,
+    "remaining_workspace_files_excluding_git_dist": [
+      "cleanup-verification.json",
+      "uninstall-manifest.json",
+      "UNINSTALL.bat",
+      "聯絡人.xlsx",
+      "docs\\uninstall.md",
+      "tools\\hook_settings.py",
+      "tools\\purge_memory.py",
+      "tools\\__pycache__\\hook_settings.cpython-310.pyc",
+      "tools\\__pycache__\\purge_memory.cpython-310.pyc"
+    ],
+    "retained_dist_entries": [
+      {
+        "name": "fast-20260919",
+        "directory": true
+      },
+      {
+        "name": "global-release-notes.md",
+        "directory": false
+      },
+      {
+        "name": "hooks-20260918",
+        "directory": true
+      },
+      {
+        "name": "hooks-20260918-final",
+        "directory": true
+      },
+      {
+        "name": "jason-memory-global.sha256",
+        "directory": false
+      },
+      {
+        "name": "jason-memory-global.zip",
+        "directory": false
+      },
+      {
+        "name": "jason-memory.zip",
+        "directory": false
+      },
+      {
+        "name": "proof-20260918",
+        "directory": true
+      },
+      {
+        "name": "recall-20260917",
+        "directory": true
+      },
+      {
+        "name": "release-notes.md",
+        "directory": false
+      },
+      {
+        "name": "uninstall-20260919",
+        "directory": true
+      },
+      {
+        "name": "uninstall-20260919-final",
+        "directory": true
+      },
+      {
+        "name": "verify-global-20260917",
+        "directory": true
+      }
+    ]
+  },
+  "retained_dist_audit": {
+    "retained_zip_count": 17,
+    "retained_memory_indexes": [],
+    "skipped_redirects": []
+  },
+  "publication_note": "Historical local verification; original user and project paths redacted. No memory contents included."
+}

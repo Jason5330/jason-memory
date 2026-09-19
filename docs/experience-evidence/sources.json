@@ -1,0 +1,36 @@
+{
+  "purpose": "Historical evidence copied as documents only; no installer, runtime or hooks enabled",
+  "archive": "dist\\uninstall-20260919-final\\jason-memory.zip",
+  "archive_sha256": "22a471b264e1b7db276b82a53f58c9224cb8446727a9762a4257d9ee038f7927",
+  "documents": [
+    {
+      "archive_entry": "jason-memory/tests/recall-validation.md",
+      "copied_to": "tests/recall-validation.md",
+      "archive_bytes_sha256": "0776310c300f154e6cdcadeef5952deff2cd2fcb14cdcf6f8367d1ae468a91ed",
+      "repository_blob_sha256": "0776310c300f154e6cdcadeef5952deff2cd2fcb14cdcf6f8367d1ae468a91ed",
+      "git_path": "docs/experience-evidence/tests/recall-validation.md"
+    },
+    {
+      "archive_entry": "jason-memory/tests/hooks-validation.md",
+      "copied_to": "tests/hooks-validation.md",
+      "archive_bytes_sha256": "d7404b0fb73812560676d0eca719aa1372d40a92429de30f341de520146993fe",
+      "repository_blob_sha256": "f7ea6a7f74f0075e96a0674e2c0195a60e4289ecec075379e6e9694c8b3ea5b6",
+      "git_path": "docs/experience-evidence/tests/hooks-validation.md"
+    },
+    {
+      "archive_entry": "jason-memory/tests/behavioral-memory.md",
+      "copied_to": "tests/behavioral-memory.md",
+      "archive_bytes_sha256": "b235dfb283259fcf2adcd59e9645b43600c2ab9e01ef50d5370cb9b2c6acbb02",
+      "repository_blob_sha256": "d9718735ee187e1cfd066e8dc1fac94af7a7535572e67c5f8424eef117401329",
+      "git_path": "docs/experience-evidence/tests/behavioral-memory.md"
+    },
+    {
+      "archive_entry": "jason-memory/docs/memory-runtime.md",
+      "copied_to": "docs/memory-runtime.md",
+      "archive_bytes_sha256": "8b34dbe4d9c8efaf2fc6b3fc245e3999cace0e7e234424dd96a94255e589c351",
+      "repository_blob_sha256": "231c3138965446e9115a90dfb33993ebdd9b09d8579ef9c11aa8c652f9e4e489",
+      "git_path": "docs/experience-evidence/docs/memory-runtime.md"
+    }
+  ],
+  "line_endings_note": "Copied from the archive without content edits. Git normalizes line endings on add/checkout; archive_bytes_sha256 verifies original archive bytes, repository_blob_sha256 verifies git show HEAD:<git_path> bytes, not platform-dependent checkout bytes."
+}
