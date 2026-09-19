@@ -1,7 +1,7 @@
 # Jason-memory
 
-**換電腦／更換 AI 接手開發：** 先讀 [開發交接入口](HANDOFF.md)，再依需要查閱
-[40 項踩坑經驗](docs/踩坑經驗總結.md)。包含架構、測試證據、剩餘問題與可直接貼給新 AI 的提示詞。
+**換電腦／更換 AI 接手開發：** 先讀 [開發交接入口](https://github.com/Jason5330/jason-memory/blob/master/HANDOFF.md)，再依需要查閱
+[40 項踩坑經驗](https://github.com/Jason5330/jason-memory/blob/master/docs/踩坑經驗總結.md)。包含架構、測試證據、剩餘問題與可直接貼給新 AI 的提示詞。
 完整交接文件在目前原始碼版本中，舊 release ZIP 不一定包含。
 
 **永久移除：** 關閉 AI 工作階段後，雙擊 `UNINSTALL.bat`，清除本份套件的框架、
