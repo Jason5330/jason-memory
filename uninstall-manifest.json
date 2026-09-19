@@ -15,7 +15,7 @@
     "UNINSTALL.bat": "032d73ed9d90feafb5b7b9c153d902fa7af5d57d65f6de23a66bd4ce49e4b35f",
     "docs/memory-runtime.md": "231c3138965446e9115a90dfb33993ebdd9b09d8579ef9c11aa8c652f9e4e489",
     "docs/superpowers/plans/2026-09-17-global-memory.md": "87740d1fdee4127d274a7fbeb11a999b367701b6e28ed3fd2b4f2779176b8bcb",
-    "docs/uninstall.md": "132be96f41d89c69dc361f26374fd3f4a0429b0a7e341c4d8ac707e7728f5d2b",
+    "docs/uninstall.md": "37017ba39f4328cd0cb0bb73d9912a3663e1fcb144c4a002cef3252d6499d0e7",
     "evals/README.md": "ac8f9750af10a3aa303ffab2b92818aa5f82e4ecc86a92dd99e682b25515f46b",
     "evals/evals.json": "ce0e7b1cb238f850a8c2b0feeb6fa1eaf8a9ec70236a08eabc359a5ead647501",
     "evals/fixtures/header-preview.html": "3b00345d59884ce10e55c96d8f033d9b029c3ddb7aa954f986f286b68083fe3f",
@@ -39,7 +39,7 @@
     "tests/test_global_store.py": "b1446b7a73ef76341e0961e6bdbdca3cdecebb83584ce40b4acce5d3b945e608",
     "tests/test_memory_runtime.py": "2a471166e0952ba4edfdf696b8c7921c4f9c39c9b5cb658e258b0066b252cf37",
     "tests/test_memory_tools.py": "b73fd31222e17f62e2c83bd536fcafbd386e85e669f748c1d8bf33be18cc8d2c",
-    "tests/test_purge_memory.py": "3e95352294fe27496b902a04f8eda38d8ef5154421aacf744be240aed64b92f6",
+    "tests/test_purge_memory.py": "5bacd0ea8131584b6f1a903ddfd1746218da72aceaea8955063a963b959e715f",
     "tools/build_download.py": "26fb9e831c3eceede8f24517fb50cf662dc6193ee56e0a83e96f8193ab92a2fa",
     "tools/build_global_download.py": "6342d8dd7c289599eaab1c9d07b858f64d493ff673edb734353d1d4b2e2ab58d",
     "tools/claude_memory_hook.py": "7ce0f85627c3c2a5b731afe3911a7709457161db45db2e43ed5df8cfc0f6db80",
@@ -49,6 +49,6 @@
     "tools/jason_doctor.py": "3969505d9da9e7bf183d0e60e0be886fea40ecfa1eff157b4eb41a889c5134e4",
     "tools/memory_facts.py": "b192f0946ddbbfcda832fed8e273b6b38ddfc9a221d8f759b19bb44da8fcb24e",
     "tools/memory_runtime.py": "5f941b6c731772db505817451904ad0541adf0b10c15d8d0d00e0383fc2fc54b",
-    "tools/purge_memory.py": "be403db8e434cc4d28b87d08f4f5db1157720bf4ef2450e3e5519aa714c323a7"
+    "tools/purge_memory.py": "0102b8ae99681bab253b138e981b53407cf97d61e8ca6ccf54159c87ab63421c"
   }
 }

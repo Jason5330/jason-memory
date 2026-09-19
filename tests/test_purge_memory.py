@@ -103,6 +103,23 @@ class PurgeTests(unittest.TestCase):
         self.run_cli(self.project / 'tools/purge_memory.py')
         self.assertFalse(self.home.exists())
 
+    def test_global_custom_home_preserves_unrelated_files(self):
+        self.install(self.base / 'existing folder')
+        self.put(self.home / 'family.xlsx', b'unrelated work')
+        self.put(self.home / 'framework/custom-app.txt', b'another application')
+        self.run_cli(self.project / 'tools/purge_memory.py')
+        self.assertEqual((self.home / 'family.xlsx').read_bytes(), b'unrelated work')
+        self.assertEqual((self.home / 'framework/custom-app.txt').read_bytes(), b'another application')
+        self.assertFalse((self.home / 'memory').exists())
+        self.assertFalse((self.home / 'framework/tools/memory_runtime.py').exists())
+
+    def test_global_owned_file_list_matches_installer(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('purge_test_installer', ROOT / 'global/install.py')
+        installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(installer)
+        self.assertEqual(set(purge.GLOBAL_FILES), set(installer.FILES.values()) | {'memory-config.json'})
+
     def test_global_package_alone_purges_all_shared_project_notes(self):
         self.install()
         output = build_global_download.build(self.base / 'global.zip')

@@ -17,6 +17,13 @@ END = b'<!-- jason-memory-global:end -->'
 RECALL = b'<!-- jason-memory-global:recall-v2 -->'
 KEEP = {'UNINSTALL.bat', 'tools/purge_memory.py', 'tools/hook_settings.py',
         'uninstall-manifest.json', 'docs/uninstall.md'}
+# Exact destinations owned by global/install.py, including its generated config.
+GLOBAL_FILES = (
+    'docs/memory-runtime.md', 'tools/memory_facts.py', 'tools/memory_runtime.py',
+    'tools/claude_memory_hook.py', 'tools/hook_settings.py', 'SKILL.md',
+    'global_store.py', 'templates/MEMORY.md', 'tools/jason_check.py',
+    'tools/jason_doctor.py', 'memory-config.json',
+)
 
 
 def digest(data):
@@ -65,6 +72,7 @@ class Plan:
     def __init__(self):
         self.files = {}  # expected original bytes, replacement bytes or None
         self.dirs = set()
+        self.empty_dirs = set()
         self.remaining = []
 
     def file(self, path, updated=None):
@@ -119,6 +127,10 @@ class Plan:
                         os.unlink(temp)
         for path in sorted(self.dirs, key=lambda p: len(p.parts), reverse=True):
             safe(path).rmdir()  # Fails if a concurrent writer created a new file.
+        for path in sorted(self.empty_dirs, key=lambda p: len(p.parts), reverse=True):
+            path = safe(path)
+            if path.is_dir() and not any(path.iterdir()):
+                path.rmdir()
 
 
 def clean_settings(plan, target):
@@ -164,6 +176,32 @@ def clean_backups(plan, directory, names, project=False):
                     plan.remaining.append(str(path) + ' (backup ownership uncertain; preserved)')
 
 
+def clean_global(plan, home):
+    # A custom installation home may predate this framework and contain user files.
+    # Delete the owned memory subtree and exact installed files, never the whole home.
+    memory = safe(home / 'memory')
+    if memory.exists() and not safe(memory / 'shared/MEMORY.md').is_file():
+        raise ValueError('Cannot identify global memory subtree: ' + str(memory))
+    plan.tree(memory)
+    framework = safe(home / 'framework')
+    for name in GLOBAL_FILES:
+        path = child(framework, name)
+        plan.file(path)
+        for parent in path.parents:
+            if parent == home:
+                break
+            plan.empty_dirs.add(parent)
+        if name.endswith('.py'):
+            cache = safe(path.parent / '__pycache__')
+            if cache.is_dir():
+                for compiled in cache.glob(path.stem + '.*.pyc'):
+                    plan.file(compiled)
+                plan.empty_dirs.add(cache)
+    plan.file(home / '.writer.lock')
+    clean_rules(plan, home / 'GENERIC_INSTRUCTIONS.md')
+    plan.empty_dirs.add(home)
+
+
 def make_plan(args):
     root = safe(args.project or Path(__file__).resolve().parents[1])
     if not root.is_dir() or not any(safe(root / name).is_file() for name in (
@@ -193,7 +231,7 @@ def make_plan(args):
             if not marker.is_file() or json.loads(marker.read_text(encoding='utf-8-sig')) != {
                     'version': 1, 'mode': 'global', 'home': '..'}:
                 raise ValueError('Cannot verify Jason-memory global ownership: ' + str(home))
-            plan.tree(home)
+            clean_global(plan, home)
 
     config = safe(root / '.jason-memory.json')
     if config.exists():

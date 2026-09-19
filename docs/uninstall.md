@@ -13,6 +13,7 @@
   封存、收據與 hook 狀態；移除 Jason-memory hooks 與可辨識的框架檔案。
 - 目前 Windows 使用者：清除 `.jason-memory-global` 內的框架、全局記憶，
   **以及該全局庫保存的所有專案記憶**。也會辨識全局入口記載的自訂安裝路徑。
+  自訂安裝目錄原有的其他檔案會保留，只刪除框架已安裝的檔案與專用記憶庫。
 - Codex、Claude Code：移除 Jason-memory 管理區塊、hooks 及可辨識的安裝備份；
   保留其他規則、設定、hooks、登入資訊。支援 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`。
 
