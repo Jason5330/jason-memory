@@ -176,6 +176,7 @@ def rebuild(config, project, opts, runner=None):
         owner = ledger.claim_job(root, 'rebuild', head)
         if owner is None:
             return dict(result, exit_code=75, error='another consolidation job is running; retry later')
+        started_revision = runtime.revision(root)
         staging = runtime.storelib.safe(ledger.raw_root(root) / ('rebuild-' + owner), root)
         staging.mkdir()
         staging_config = staging / '.jason-memory.json'
@@ -195,6 +196,9 @@ def rebuild(config, project, opts, runner=None):
             os.environ['JASON_DREAM'] = previous
     try:
         with runtime.opened(config, project) as (_, _, roots):
+            if code == 0 and runtime.revision(root) != started_revision:
+                # Notes changed while rebuilding (e.g. foreground_writes=true): swapping would undo them.
+                code, error = 75, 'memory store changed during rebuild; retry'
             if code == 0:
                 try:
                     rebuilt = runtime.notes(staging / 'store')

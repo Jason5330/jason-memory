@@ -238,11 +238,12 @@ def claim_job(root, kind, upto):
 
 
 def release_job(root, owner, upto=None, error=None):
-    """Finish a job: advance the cursor on success, record the error otherwise. Never clears
-    another owner's job."""
+    """Finish a job: advance the cursor on success, record the error otherwise. Only the current
+    owner may finish: a stale or replaced worker changes nothing (no cursor, no error, no marker)."""
     state = dream_state(root)
-    if (state.get('running') or {}).get('owner') == owner:
-        state.pop('running', None)
+    if (state.get('running') or {}).get('owner') != owner:
+        return False
+    state.pop('running', None)
     if error is None and upto is not None:
         existing = records(root)
         if upto > state['cursor'] and upto <= len(existing):
@@ -253,6 +254,7 @@ def release_job(root, owner, upto=None, error=None):
     elif error is not None:
         state['last_error'] = dict(error, at=time.time(), upto=upto)
     _save_state(root, state)
+    return True
 
 
 def verified_records(root):
@@ -339,7 +341,11 @@ def dream_run(config, project, upto, opts, owner=None):
     else:
         code = 0
     with runtime.opened(config, project) as (_, _, roots):
-        release_job(root, owner, upto, None if code == 0 else {'code': code, 'error': error or 'exit code'})
+        finished = release_job(root, owner, upto, None if code == 0 else {'code': code, 'error': error or 'exit code'})
+        if finished and code == 0:
+            # Records that arrived while this worker was busy start the next run now, instead of
+            # waiting for another prompt/tool/Stop event. Failures wait for the next event (no hot loop).
+            maybe_dream(root, config, project, opts)
     return code
 
 

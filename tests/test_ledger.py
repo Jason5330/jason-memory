@@ -360,6 +360,35 @@ class LedgerTests(Base):
             with self.assertRaisesRegex(ValueError, 'truncated'):
                 ledger.verified_records(self.root)
 
+    def test_records_arriving_during_a_run_start_the_next_run(self):
+        """#12 follow-up: the tail batch does not wait for another external event."""
+        opts = dict(ledger.settings(self.config), dream_every=2, dream_command=[sys.executable, '-c', 'pass'])
+        spawned = self.spawned_workers
+        with runtime.opened(self.config):
+            for text in ('a', 'b'):
+                ledger.append(self.root, 'prompt', {'text': text})
+            self.assertEqual(ledger.maybe_dream(self.root, self.config, self.project, opts), 2)
+            for text in ('c', 'd'):
+                ledger.append(self.root, 'prompt', {'text': text})
+        self.assertEqual(ledger.dream_run(self.config, self.project, 2, opts, self.owner(spawned[0])), 0)
+        self.assertEqual(len(spawned), 2)
+        self.assertIn('4', spawned[1])
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['cursor'], 2)
+
+    def test_stale_owner_cannot_commit_cursor(self):
+        """#15 follow-up: a replaced worker changes neither cursor, error nor the new marker."""
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'prompt', {'text': 'x'})
+            stale = ledger.claim_job(self.root, 'dream', 1)
+            state = ledger.dream_state(self.root)
+            state['running']['owner'] = 'replacement'
+            ledger._save_state(self.root, state)
+            self.assertFalse(ledger.release_job(self.root, stale, 1))
+            self.assertFalse(ledger.release_job(self.root, stale, 1, {'code': 3, 'error': 'x'}))
+            after = ledger.pending(self.root)
+        self.assertEqual((after['cursor'], after['last_error'], after['running']['owner']), (0, None, 'replacement'))
+
     def test_disabled_ledger_writes_nothing(self):
         self.config.write_text('{"version":1,"mode":"project","memory_root":".jason-memory"}', encoding='utf-8')
         self.event('UserPromptSubmit', prompt='hi')
@@ -519,6 +548,24 @@ class BackgroundModeTests(Base):
         self.assertEqual(blocked['exit_code'], 75)
         with runtime.opened(self.config):
             self.assertEqual(ledger.pending(self.root)['running']['kind'], 'dream')
+
+    def test_rebuild_does_not_undo_notes_written_meanwhile(self):
+        """#15 follow-up: if the live store changes during rebuild, the swap is refused."""
+        import os
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='x')
+
+        def concurrent_write(cmd, text):
+            os.environ['JASON_DREAM'] = '1'
+            with runtime.opened(self.config):
+                runtime.remember(self.root, 'user', 'written.meanwhile', '保留這則', '來源：前台')
+            return 0
+        result = dream.rebuild(self.config, self.project, ledger.settings(self.config), concurrent_write)
+        self.assertEqual(result['exit_code'], 75)
+        self.assertIn('changed during rebuild', result['error'])
+        self.assertIn('保留這則', ''.join(runtime.notes(self.root).values()))
+        with runtime.opened(self.config):
+            self.assertIsNone(ledger.pending(self.root)['running'])
 
     def test_exact_lookup_in_raw_ledger(self):
         self.event('UserPromptSubmit', prompt='錯誤碼是 E-4096-XY，報價 12,345.67 元')
