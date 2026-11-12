@@ -122,7 +122,7 @@ def consolidate(config, project, start, upto, opts, runner=None):
         prefix = runtime_prefix(config, project, cfg)
     if not records:
         return 0
-    command = agent_command(opts)
+    command = agent_command(opts) if runner is None else ['injected-runner']
     if command is None:
         print('Jason-memory dream: no agent CLI found (claude/codex); set ledger.dream_agent', file=sys.stderr)
         return 127
