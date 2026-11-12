@@ -18,3 +18,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m unittest discover -s tests -v
+      - name: Build release ZIP and run its packaged tests
+        shell: bash
+        run: |
+          python tools/build_download.py --output "$RUNNER_TEMP/pkg/jason-memory.zip"
+          python -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$RUNNER_TEMP/pkg/jason-memory.zip" "$RUNNER_TEMP/pkg/unpacked"
+          cd "$RUNNER_TEMP/pkg/unpacked/jason-memory"
+          python -m unittest discover -s tests -v

@@ -33,8 +33,8 @@ python tools/memory_runtime.py --config .jason-memory.json remember --scope proj
 同時安裝兩版時，明確的專案 `.jason-memory.json` 優先，全局 hook 在該專案
 略過，不同時注入另一套記憶。既有 `.ai-memory` 不會自動猜測、搬移或刪除。
 
-每則訊息先取得最新內容。沒有 hook 時執行 `context`；Claude hook 已完整提供且未變更的正文可重用；
-若標示 PARTIAL SNAPSHOT，仍須讀取遺漏的相關筆記才回覆。正常讀取不通報。
+每則訊息先取得最新內容。沒有 hook 時執行 `index`，再 `read` 相關筆記；Claude hook 已提供且未變更的正文可重用；
+若標示 PARTIAL SNAPSHOT，只用 `read` 讀取與本輪相關的遺漏筆記，不輸出整庫。正常讀取不通報。
 hook 注入內容不是對話文字，但仍占上下文 token；超過 8,000 字元明確標示省略。
 
 ```text
@@ -134,6 +134,61 @@ Claude 的 PostToolUse 只接收宿主工具輸出的收據；Stop 再核對本�
 
 Codex 及其他 AI 沿常駐規則呼叫同一 runtime；這套 Claude 事件不會自動變成
 其他宿主的 hook。尚未接入的工具不保證自動召回。
+
+## 小索引與按需讀取
+
+新會話與 PARTIAL 時不用 `context` 輸出整庫（107 筆時約 156 KB）。改用：
+
+```text
+python tools/memory_runtime.py --config .jason-memory.json index [--max-bytes 6000]
+python tools/memory_runtime.py --config .jason-memory.json read --note user/xxx.md [--note ...]
+```
+
+`index` 只回各記憶庫的索引列（預設每庫 6,000 UTF-8 bytes 上限，超過標 `truncated`）；
+`read` 只讀指定筆記，不寫入、不發收據。Claude hook 首次注入：索引列＋`user`/`feedback`
+常駐偏好正文；`project`/`reference` 只列索引。預算以字元計（8,000），同時避免觸發宿主的大檔回退。
+無異動的 `UserPromptSubmit` 與無保存宣告的 `Stop` 以檔名／大小／mtime 指紋判斷，跳過整庫健檢。
+`context` 保留給更正、衝突整理與批次 `apply` 前取得 revision。
+
+## remember 的類型
+
+`remember --type user|feedback|project|reference`，預設 `feedback`。筆記放在同名子目錄，
+frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事實的舊筆記會被封存並搬到
+正確類型，不留下重複。
+
+## 憑證不入庫
+
+`remember` 與 `apply` 會拒絕看起來像憑證值的內容（常見前綴如 `sk-`、`ghp_`、`AKIA`、私鑰區塊，
+或 token／password／密碼 等字詞後面的含數字字串），錯誤以 `NOT SAVED` 開頭。環境變數名稱、
+保管位置（vault、1Password）可記。這是防誤存，不是完整的機密掃描器。
+
+## 原始帳本、鏡像與背景整理
+
+參考影片的做法：原始紀錄是唯一事實來源，前台只管做事，整理放到背景，依新增紀錄量觸發。
+預設關閉；在 `.jason-memory.json` 加入：
+
+```json
+{"version": 1, "mode": "project", "memory_root": ".jason-memory",
+ "ledger": {"enabled": true, "dream_every": 20,
+            "dream_command": ["claude", "-p", "依 JASON_DREAM_FROM..JASON_DREAM_UPTO 的原始紀錄整理記憶"]}}
+```
+
+- **帳本** `.jason-memory/.raw/ledger.jsonl`：hook 依序追加使用者提示、Shell 工具呼叫與結果、
+  助理最終回覆。每筆有 `seq`、`prev`、`hash`，只用 O_APPEND 追加；`memory_ledger.py verify`
+  重算雜湊鏈，任何修改、刪除、重排都會報錯。對話中的憑證值寫入前會遮蔽為 `[REDACTED]`。
+- **重播／精確查詢**：`replay [--session ID]` 按原順序取回事件；`search --text 原文`
+  找確切句子、數字或錯誤訊息。Wiki／筆記求快，帳本求準。
+- **文件鏡像**：`mirror --file 路徑` 把文件逐位元組存到 `.raw/blobs/<sha256>`，
+  帳本記錄來源路徑、大小與指紋；同內容只存一份，不改動原件。
+- **背景整理（做夢）**：每次追加後若未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作，
+  hook 以分離程序啟動 `dream-run`，前台不等待。`dream_command` 在鎖外執行，環境變數
+  `JASON_DREAM_FROM`／`JASON_DREAM_UPTO`／`JASON_MEMORY_CONFIG` 指定範圍。成功才推進游標，
+  失敗記 `last_error` 並於下次觸發重試；沒有新紀錄不重跑。`pending` 查看狀態。
+- **可重建**：整理工具寫出的筆記應在正文標出來源 `seq` 或文件 `sha256`。筆記寫亂時可封存，
+  由帳本重新整理；帳本與 harness 無關，可轉給其他工具使用。
+
+限制：Claude hook 只對 Shell 類工具記錄 PostToolUse；其他工具的結果只透過助理回覆間接保留。
+背景整理品質取決於 `dream_command` 所用的模型，本框架只負責觸發、範圍與游標。
 
 ## 保證與限制
 

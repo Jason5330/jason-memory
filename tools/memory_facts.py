@@ -57,3 +57,41 @@ def audit(notes):
                  for key, values in sorted(groups.items()) if len(values) > 1]
     return {'conflicts': conflicts, 'invalid_facts': errors, 'semantic_review_needed': review,
             'facts': [{'subject': k[0], 'predicate': k[1], 'values': v} for k, v in sorted(groups.items())]}
+
+
+# --- Credential guard -------------------------------------------------------
+# Memory may record WHERE a secret lives (an environment variable name or vault
+# path) but never the secret value itself.
+_SECRET_PREFIX = re.compile(
+    r'-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|'
+    r'\bgithub_pat_[A-Za-z0-9_]{20,}|\bAKIA[0-9A-Z]{16}\b|\bxox[abprs]-[A-Za-z0-9-]{10,}|'
+    r'\bAIza[0-9A-Za-z_-]{30,}|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}')
+_SECRET_WORD = (r'(?:api[\s_-]*key|access[\s_-]*key|secret|token|password|passwd|pwd|credential|bearer|'
+                r'private[\s_-]*key|密碼|密码|口令|金鑰|金钥|密鑰|密钥|憑證|凭证|權杖|令牌)')
+_ENV_HINT = re.compile(r'(?:環境變數|环境变量|變數名|变量名|env(?:ironment)?(?:\s+var(?:iable)?)?|\$|%|vault|保管|存放於|存放在)\s*[:：=]?\s*$', re.I)
+_CANDIDATE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_\-./+=]{7,}')
+
+
+def secret_values(text):
+    """Return credential-looking values in text. Conservative: env var NAMES are allowed."""
+    found = [m.group(0) for m in _SECRET_PREFIX.finditer(text)]
+    for keyword in re.finditer(_SECRET_WORD, text, re.I):
+        window = text[keyword.end():keyword.end() + 60]
+        for match in _CANDIDATE.finditer(window):
+            value = match.group(0)
+            before = window[:match.start()]
+            if not (re.search(r'\d', value) and re.search(r'[A-Za-z]', value)):
+                continue  # Plain words or identifiers without digits are not treated as values.
+            if _ENV_HINT.search(before) or re.fullmatch(r'\$\{?[A-Z_][A-Z0-9_]*\}?', value):
+                continue
+            if re.fullmatch(r'[A-Z][A-Z0-9_]*', value) and re.search(r'\b(?:env|環境|环境)', text, re.I):
+                continue
+            found.append(value)
+            break
+    return sorted(set(found))
+
+
+def redact(text):
+    for value in secret_values(text):
+        text = text.replace(value, '[REDACTED]')
+    return text

@@ -12,9 +12,11 @@ import time
 from urllib.parse import unquote
 
 import memory_runtime as runtime
+import memory_ledger as ledger
 
 EVENTS = ('SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop')
-LIMIT = 8000  # Stay below Claude's large additionalContext file-fallback threshold.
+LIMIT = 8000  # Characters; stay below Claude's large additionalContext file-fallback threshold.
+INDEX_SHARE = 2500  # Characters of index rows per store.
 
 
 def additional(event, text):
@@ -42,7 +44,8 @@ def render(snapshot, config, project, limit=LIMIT):
             'search ALL active notes for the same subject/fact and batch-correct every occurrence, '
             'preserving unrelated facts. After EACH successful change finish with a user-visible '
             'notice describing the change and a clickable absolute note link; failure means not saved. '
-            'This snapshot satisfies recall: reuse complete notes here; do not run context or read SKILL.md again. '
+            'This snapshot satisfies recall: always-apply preferences are inlined; other notes are listed in the index '
+            'and read individually only when relevant. Do not run full context or read SKILL.md again. '
             'Simple new single facts: ONE remember call generates metadata, checks, index and receipt. '
             'Reuse existing subject/key identifiers; for corrections/mixed notes use batch apply --plan - from stdin. '
             'No separate plan file, doctor, check or verify after a successful save. '
@@ -56,13 +59,15 @@ def render(snapshot, config, project, limit=LIMIT):
                       Path(runtime.__file__).resolve().as_posix(), '--config', Path(config).as_posix(),
                       '--project', Path(project).as_posix()))
     head += ('Command prefix (Bash): ' + command + '\n'
-             'Append: remember --scope project --subject user --key STABLE_KEY --value "REQUIREMENT" --why "USER_EVIDENCE"\n'
+             'Append: remember --scope project --type feedback --subject user --key STABLE_KEY --value "REQUIREMENT" --why "USER_EVIDENCE"\n'
+             '--type user for identity/role, project for project constraints, feedback for preferences. '
+             'Never store secret values (tokens, passwords, keys); record only the env var name or where it is kept.\n'
              'Use global scope only for clearly cross-project preferences; otherwise project. '
              'Only complex batch corrections need docs/memory-runtime.md.\n')
     parts = [head]
     omitted = []
     ordered_notes = []
-    # Full note bodies, not index summaries. User/feedback first; include other notes if budget permits.
+    # Small index for navigation; full bodies only for always-apply user/feedback notes.
     for scope, info in sorted(snapshot.items(), key=lambda item: item[0] != 'project'):
         parts.append(scope + ' root=' + info['root'] + ' revision=' + info['revision'] + '\n')
         issues = {key: info['audit'].get(key) for key in ('conflicts', 'invalid_facts', 'structural_errors')}
@@ -70,19 +75,24 @@ def render(snapshot, config, project, limit=LIMIT):
             issue = json.dumps(issues, ensure_ascii=False)
             parts.append('CONFLICT: do not choose an unsupported value. Audit/correct before asserting it. '
                          + issue[:1000] + '\n')
-        ordered = sorted(info['notes'].items(), key=lambda pair: (not bool(re.search(r'^type: (user|feedback)\s*$', pair[1], re.M)), pair[0]))
-        ordered_notes.extend((str(Path(info['root']) / name), body) for name, body in ordered)
-    for path, body in ordered_notes:
+        rows = [line for line in info.get('index', '').splitlines() if line.startswith('- [')]
+        if rows:
+            parts.append('INDEX ' + scope + ' (read a listed note only when relevant):\n' + '\n'.join(rows)[:INDEX_SHARE] + '\n')
+        always = sorted((name, body) for name, body in info['notes'].items()
+                        if re.search(r'^type: (user|feedback)\s*$', body, re.M))
+        ordered_notes.extend((scope, name, str(Path(info['root']) / name), body) for name, body in always)
+    for scope, name, path, body in ordered_notes:
         item = '\nNOTE ' + path + '\n' + body + '\nEND NOTE\n'
         if sum(map(len, parts)) + len(item) <= limit - 1200:
             parts.append(item)
         else:
-            omitted.append(path)
+            omitted.append('--scope ' + scope + ' --note ' + name)
     if omitted:
-        parts.append('\nPARTIAL SNAPSHOT: ' + str(len(omitted)) + ' notes omitted. Run memory_runtime.py '
-                     '--config CONFIG --project ACTIVE_PROJECT context and read applicable omitted notes '
-                     'before replying. Do not claim complete recall. Examples: ' + '; '.join(omitted)[:700] + '\n')
-    return ''.join(parts)[:limit]
+        parts.append('\nPARTIAL SNAPSHOT: ' + str(len(omitted)) + ' preference notes omitted. Do NOT dump the whole '
+                     'store with context. Only if one may apply to THIS task, read just that note with: '
+                     'the Command prefix above + read --scope SCOPE --note RELATIVE_NOTE. Omitted: ' + '; '.join(omitted)[:700] + '\n')
+    text = ''.join(parts)[:limit]
+    return text
 
 
 def protected(path, roots):
@@ -132,6 +142,13 @@ def notice_links(response, changed_paths, previous, roots):
     return True
 
 
+DOCUMENT_TARGET = (r'文件|文檔|文档|檔案|档案|報表|报表|表格|README|PRD|\bdocuments?\b|\bfiles?\b|\bspec\b|'
+                   r'[\w\-]+\.(?:md|docx?|xlsx?|pptx?|pdf|txt|csv|json|html?|py|js|ts|yml|yaml)\b')
+PROGRAM_MEMORY = (r'\bmemory\s+(?:allocators?|leaks?|usage|footprint|pools?|management|layout|address(?:es)?|'
+                  r'bandwidth|limits?|pressure|consumption|corruption|safety|barriers?|model|mapped|maps?|errors?)\b|'
+                  r'\b(?:in|out of|shared|heap|stack|gpu|virtual|cache|flash)[\s-]+memory\b|記憶體|内存|內存')
+
+
 def success_claim(response):
     """Conservative common wording, not a general semantic classifier."""
     text = re.sub(r'```.*?```|~~~.*?~~~', '', response, flags=re.S)
@@ -144,6 +161,10 @@ def success_claim(response):
         if (re.search(r'已(?:經|经)?(?:更新|修補|修复|修改|修正)(?:了)?\s*(?:記憶|记忆)(?:框架|系統|系统|機制|机制|工具|程式|代码|代碼|\s*hooks?)', sentence, re.I)
                 and not re.search(r'偏好|需求|要求|筆記|笔记', sentence)):
             continue  # Reporting a code fix is not reporting a stored preference.
+        if (re.search(DOCUMENT_TARGET, sentence, re.I)
+                and not re.search(r'記憶|记忆|記住|记住|\.jason-memory|偏好|preference|memory note', sentence, re.I)):
+            continue  # Saving a requirements document/file is ordinary work, not a memory claim.
+        sentence = re.sub(PROGRAM_MEMORY, '', sentence, flags=re.I)
         memory_context = bool(re.search(r'記憶|记忆|記住|记住|偏好|需求|要求|筆記|笔记|\bmemory\b|preference|remember|\.jason-memory', sentence, re.I))
         if re.search(r'已(?:經|经)?(?:記住|记住|記憶|记忆)|已(?:經|经)?(?:將|将|把)[^。\n]{0,60}(?:記住|记住|記憶|记忆)|(?:記住|记住|記下|记下)了', sentence):
             return True
@@ -201,6 +222,48 @@ def verified_claim(response, state, roots):
     return all(path.is_absolute() and path in {Path(p) for p in verified} for path in linked)
 
 
+def store_fingerprint(roots):
+    """Cheap change detector: names, sizes and mtimes of notes and indexes (no reads)."""
+    rows = []
+    for scope, root in sorted(roots.items()):
+        for folder, dirs, files in os.walk(root):
+            dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
+            for filename in sorted(files):
+                if filename.casefold().endswith('.md'):
+                    info = os.stat(os.path.join(folder, filename))
+                    rows.append((scope, os.path.relpath(os.path.join(folder, filename), root),
+                                 info.st_size, info.st_mtime_ns))
+    return hashlib.sha256(json.dumps(rows).encode('utf-8')).hexdigest()
+
+
+def ledger_settings(config):
+    try:
+        return ledger.settings(config)
+    except (OSError, ValueError):
+        return dict(ledger.DEFAULT_SETTINGS)
+
+
+def foreign_paths(roots, state_root, own_state, since):
+    """Note paths written this turn by OTHER sessions, proven by receipts held in their hook state."""
+    result = set()
+    for other in state_root.glob('*.json'):
+        if other == own_state:
+            continue
+        try:
+            handles = runtime.read_json(other).get('receipts', [])
+        except (OSError, ValueError):
+            continue
+        for item in handles:
+            for root in roots.values():
+                if item.get('receipt_root') != str(root):
+                    continue
+                try:
+                    result.update(runtime.check_receipt(root, item['receipt'], since))
+                except (OSError, ValueError, KeyError, TypeError):
+                    pass
+    return result
+
+
 def handle(event, config):
     name = event.get('hook_event_name')
     if name not in EVENTS:
@@ -210,7 +273,8 @@ def handle(event, config):
         failed = isinstance(output, dict) and (output.get('interrupted') or output.get('isError') or
                   output.get('exitCode', output.get('exit_code', 0)) not in (0, None))
         handles = tool_receipts(output)
-        if failed or event.get('tool_name') not in ('Bash', 'PowerShell', 'powershell') or not handles:
+        record_tool = ledger_settings(config)['enabled']
+        if (failed or event.get('tool_name') not in ('Bash', 'PowerShell', 'powershell') or not handles) and not record_tool:
             return {}  # Stop still audits the store; ordinary tools need no full-store pass.
     cwd = Path(event.get('cwd') or os.getcwd()).resolve()
     cfg, _, _, initial_roots = runtime.configuration(config, cwd)
@@ -254,6 +318,11 @@ def handle(event, config):
         state_path = runtime.storelib.safe(state_root / (session + '.json'), state_root)
         state = runtime.read_json(state_path) if state_path.exists() else {}
         if name == 'PostToolUse':
+            if record_tool:
+                ledger.append(roots['project'], 'tool', {'tool': event.get('tool_name', ''),
+                              'input': event.get('tool_input'), 'result': output}, event.get('session_id', ''))
+                if failed or not handles:
+                    return {}
             if state:
                 for handle in handles:
                     for root in roots.values():
@@ -267,21 +336,48 @@ def handle(event, config):
                 state['receipts'] = state.get('receipts', [])[-128:]
                 runtime.storelib.atomic_write(state_path, json.dumps(state))
             return {}
+        fingerprint = store_fingerprint(roots)
+        opts = ledger_settings(config)
+        if name == 'UserPromptSubmit' and opts['enabled']:
+            ledger.append(roots['project'], 'prompt', {'text': event.get('prompt', '')}, event.get('session_id', ''))
+            ledger.maybe_dream(roots['project'], config, project, opts)
+        if name == 'UserPromptSubmit' and state and state.get('fingerprint') == fingerprint:
+            # Cheap path: nothing on disk changed since the last snapshot; start a new turn baseline.
+            state.update({'turn_started_ns': time.time_ns(), 'receipts': [], 'retried': False,
+                          'versions': state.get('seen', state.get('versions'))})
+            runtime.storelib.atomic_write(state_path, json.dumps(state))
+            return {}
+        if name == 'Stop' and opts['enabled']:
+            ledger.append(roots['project'], 'assistant', {'text': event.get('last_assistant_message', ''),
+                          'stop_hook_active': bool(event.get('stop_hook_active'))}, event.get('session_id', ''))
+        if (name == 'Stop' and state and state.get('fingerprint') == fingerprint
+                and state.get('files') is not None and not success_claim(event.get('last_assistant_message', ''))
+                and state.get('versions') == state.get('seen')):
+            return {}  # No change during this turn and no memory claim: skip the full-store audit.
         snapshot = runtime.context(roots)
         versions = {s: i['revision'] for s, i in snapshot.items()}
         current_files = {str(Path(i['root']) / p): runtime.storelib.digest(t)
                          for i in snapshot.values() for p, t in i['notes'].items()}
         if name in ('SessionStart', 'UserPromptSubmit'):
-            changed = versions != state.get('versions') or name == 'SessionStart'
-            state = {'versions': versions, 'files': current_files, 'retried': False, 'project_root': str(project),
-                     'turn_started_ns': time.time_ns(), 'receipts': []}
+            changed = versions != state.get('seen', state.get('versions')) or name == 'SessionStart'
+            if name == 'SessionStart' and event.get('source') == 'compact' and state.get('files') is not None:
+                # Compaction refreshes recall but is still the same turn: keep its baseline,
+                # verified receipts and pending notices.
+                state.update({'seen': versions, 'fingerprint': fingerprint, 'project_root': str(project)})
+            else:
+                state = {'versions': versions, 'seen': versions, 'files': current_files, 'retried': False,
+                         'project_root': str(project), 'fingerprint': fingerprint,
+                         'turn_started_ns': time.time_ns(), 'receipts': []}
             runtime.storelib.atomic_write(state_path, json.dumps(state))
             return additional(name, render(snapshot, config, project)) if changed else {}
         problems = {s: i['audit'] for s, i in snapshot.items()
                     if i['audit']['conflicts'] or i['audit']['invalid_facts'] or i['audit'].get('structural_errors')}
         previous = state.get('files', {})
         changed_paths = sorted(p for p in set(previous) | set(current_files) if previous.get(p) != current_files.get(p)) if state else []
-        if state and versions != state.get('versions') and not changed_paths:
+        foreign = foreign_paths(roots, state_root, state_path, state.get('turn_started_ns', 0)) if changed_paths else set()
+        own_change = bool(changed_paths) and any(p not in foreign for p in changed_paths)
+        changed_paths = [p for p in changed_paths if p not in foreign]
+        if state and versions != state.get('versions') and not changed_paths and (own_change or not foreign):
             changed_paths = [str(root / 'MEMORY.md') for root in roots.values()]
         response = event.get('last_assistant_message', '')
         state.setdefault('turn_started_ns', time.time_ns())

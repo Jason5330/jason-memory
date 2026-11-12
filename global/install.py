@@ -20,6 +20,7 @@ FILES = {
     "docs/memory-runtime.md": "docs/memory-runtime.md",
     "tools/memory_facts.py": "tools/memory_facts.py",
     "tools/memory_runtime.py": "tools/memory_runtime.py",
+    "tools/memory_ledger.py": "tools/memory_ledger.py",
     "tools/claude_memory_hook.py": "tools/claude_memory_hook.py",
     "tools/hook_settings.py": "tools/hook_settings.py",
     "global/SKILL.md": "SKILL.md",

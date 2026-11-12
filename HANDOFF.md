@@ -51,6 +51,22 @@
 
 後續整理本交接文件時，原電腦的全局目錄與 Codex 全局入口已再次存在，本專案記憶目錄仍不存在。重建來源未查明；本次文件整理未執行安裝，也未再次刪除。接手時應核對所在電腦的即時狀態，不用歷史報告推論現在必然已安裝或已卸載。
 
+## ledger-20261112 版（依 Issue #1–#10 與參考影片）
+
+評估與處理紀錄見 [evals/results/2026-11-12.md](evals/results/2026-11-12.md)。重點：
+
+- `tools/memory_ledger.py`：只追加、雜湊鏈的原始帳本，可重播、可精確查詢；文件逐位元組鏡像；
+  依新增紀錄量觸發背景整理，成功才推進游標（預設關閉，見 runtime 協議）。
+- `index`／`read --note`：小索引與按需讀取；hook 只內嵌 user/feedback 正文，PARTIAL 不再整庫輸出；
+  無異動輪次用 mtime 指紋跳過整庫健檢。
+- 憑證值拒絕入庫（remember/apply），帳本遮蔽；`remember --type` 正確分類並搬移錯類筆記。
+- Stop hook：他會話寫入以其收據歸屬不再誤擋；compact 保留同輪收據與待通報變更；
+  一般文件與程式記憶體（allocator/leak）不再誤判為記憶宣告。
+- `CLAUDE.md` 改為 `@AGENTS.md` 匯入，Codex／Claude 共用單一規則來源。
+- 使用版 ZIP 納入 `global/README.md`；CI 新增「建 ZIP → 解壓 → 跑套件內測試」。
+
+仍未驗證：背景整理的實際模型品質（V3、V5 的前台品質對照）、真實 Claude/Codex 端到端的 token 量測。
+
 ## 不得誤認為已解決的問題
 
 | 下一步 | 已知證據／缺口 | 建議驗收 |

@@ -23,7 +23,7 @@ class GlobalInstallTests(unittest.TestCase):
         self.profile = self.base / "profile"
         self.home = self.base / "shared home"
         for relative in ("global/SKILL.md", "global/global_store.py", "templates/MEMORY.md",
-                         "tools/jason_check.py", "tools/jason_doctor.py", "tools/memory_runtime.py",
+                         "tools/jason_check.py", "tools/jason_doctor.py", "tools/memory_runtime.py", "tools/memory_ledger.py",
                          "tools/memory_facts.py", "tools/claude_memory_hook.py", "docs/memory-runtime.md"):
             path = self.package / relative
             path.parent.mkdir(parents=True, exist_ok=True)

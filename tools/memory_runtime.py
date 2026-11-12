@@ -24,6 +24,10 @@ spec = importlib.util.spec_from_file_location('memory_store', source)
 storelib = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(storelib)
 MAX_BYTES = 8 * 1024 * 1024
+NOTE_TYPES = ('user', 'feedback', 'project', 'reference')
+SECRET_ERROR = ('NOT SAVED: credential-like value detected. Memory may store an environment variable '
+                'name or where the secret is kept, never the secret value itself: ')
+INDEX_BUDGET = 6000  # UTF-8 bytes per store for the bounded index command.
 
 
 def read_json(path):
@@ -324,6 +328,10 @@ def apply(root, plan, scope='project'):
         extracted, structured = memory_facts.extract(content)
         if old.get(name) != content and fm and fm.get('type') in ('user', 'feedback') and not structured:
             raise ValueError('New/corrected user or feedback notes require a jason-facts JSON block: ' + name)
+        if old.get(name) != content:
+            leaked = memory_facts.secret_values(content)
+            if leaked:
+                raise ValueError(SECRET_ERROR + name)
         final[name] = content
     # Updating a mixed note must not silently drop an unrelated identified fact.
     retained_keys = {(s, p) for content in final.values() for s, p, _ in memory_facts.extract(content)[0]}
@@ -365,15 +373,23 @@ def apply(root, plan, scope='project'):
     return result
 
 
-def remember(root, subject, key, value, why, scope='project'):
+def remember(root, subject, key, value, why, scope='project', kind=None):
     """Single-call add/verify. Corrections retain the explicit batch review path."""
     if not all(isinstance(v, str) and v.strip() for v in (subject, key, value, why)):
         raise ValueError('remember requires nonempty --subject, --key, --value and --why')
     if any('\n' in v or '\r' in v or '```' in v for v in (subject, key, value, why)):
         raise ValueError('remember accepts single-line facts; use apply for complex notes')
+    explicit = kind is not None
+    kind = kind or 'feedback'
+    if kind not in NOTE_TYPES:
+        raise ValueError('--type must be one of: ' + ', '.join(NOTE_TYPES))
+    if scope == 'global' and kind == 'project':
+        raise ValueError('Project notes require project scope')
+    if memory_facts.secret_values(' '.join((subject, key, value, why))):
+        raise ValueError(SECRET_ERROR + 'remember --value/--why')
     subject, key = memory_facts.canonical(subject), memory_facts.canonical(key)
     data = notes(root)
-    matches = []
+    matches, retype = [], []
     wanted = memory_facts.canonical(value) if key == 'occupation' else value
     for name, content in data.items():
         facts, _ = memory_facts.extract(content)
@@ -381,24 +397,67 @@ def remember(root, subject, key, value, why, scope='project'):
             if (s, p) == (subject, key):
                 if v != wanted:
                     raise ValueError('Existing fact differs: use context and apply to batch-correct related notes, preserving other facts: ' + name)
-                matches.append(name)
-    if matches:
+                fm, _, _ = storelib.doctor._frontmatter(content)
+                # A single-fact note filed under the wrong type is moved, not duplicated.
+                if explicit and fm and fm.get('type') != kind and len(facts) == 1:
+                    retype.append(name)
+                else:
+                    matches.append(name)
+    if matches and not retype:
         return verify(root, sorted(set(matches)))
-    slug = 'preference-' + hashlib.sha256((subject + '\0' + key).encode('utf-8')).hexdigest()[:16]
-    name = 'feedback/' + slug + '.md'
-    if name in data:
+    prefix = 'preference' if kind == 'feedback' else kind
+    slug = prefix + '-' + hashlib.sha256((subject + '\0' + key).encode('utf-8')).hexdigest()[:16]
+    name = kind + '/' + slug + '.md'
+    if name in data and name not in retype:
         raise ValueError('Existing note path needs manual batch review; do not overwrite: ' + name)
     today = date.today().isoformat()
+    created = today
+    for old_name in retype:
+        fm, _, _ = storelib.doctor._frontmatter(data[old_name])
+        created = min(created, str((fm or {}).get('created') or today))
     # JSON strings are valid quoted YAML scalar values; no hand-written metadata required.
     description = json.dumps(value, ensure_ascii=False)
-    content = ('---\nname: ' + slug + '\ndescription: ' + description + '\ntype: feedback\n'
-               'created: ' + today + '\nupdated: ' + today + '\n---\n\n' + value + '\n\nWhy: ' + why +
+    content = ('---\nname: ' + slug + '\ndescription: ' + description + '\ntype: ' + kind + '\n'
+               'created: ' + created + '\nupdated: ' + today + '\n---\n\n' + value + '\n\nWhy: ' + why +
                '\n\nHow to apply: ' + ('全局共用' if scope == 'global' else '本專案') + '；' + value +
                '\n\n```jason-facts\n' + json.dumps([{'subject': subject, 'predicate': key, 'value': value}], ensure_ascii=False) + '\n```\n')
     index = read_index(root)
-    result = apply(root, {'expected_revision': revision_for(data, index), 'updates': {name: content}, 'retire': []}, scope)
-    result['saved_fact'] = {'subject': subject, 'predicate': key, 'value': value}
+    plan = {'expected_revision': revision_for(data, index), 'updates': {name: content},
+            'retire': sorted(set(retype) - {name})}
+    result = apply(root, plan, scope)
+    result['saved_fact'] = {'subject': subject, 'predicate': key, 'value': value, 'type': kind}
     return result
+
+
+def bounded_index(roots, budget=INDEX_BUDGET):
+    """Small navigation view for a new session: index lines only, never note bodies."""
+    result = {}
+    for scope, root in roots.items():
+        text = read_index(root)
+        raw = text.encode('utf-8')
+        truncated = len(raw) > budget
+        if truncated:
+            text = raw[:budget].decode('utf-8', 'ignore').rsplit('\n', 1)[0] + '\n'
+        result[scope] = {'root': str(root), 'revision': revision(root), 'index': text,
+                         'truncated': truncated, 'bytes': len(text.encode('utf-8'))}
+    return result
+
+
+def read_notes(root, names, budget=MAX_BYTES):
+    """Read only the selected notes (no receipt, no write)."""
+    if not names:
+        raise ValueError('read requires at least one --note relative/path.md')
+    contents, used = {}, 0
+    for name in names:
+        path = note_path(root, name)
+        if path.stat().st_size > storelib.doctor.NOTE_READ_CAP:
+            raise ValueError('Note exceeds reading limit: ' + name)
+        text = path.read_text(encoding='utf-8-sig')
+        used += len(text.encode('utf-8'))
+        if used > budget:
+            raise ValueError('Selected notes exceed --max-bytes; read fewer notes')
+        contents[name] = text
+    return {'root': str(root), 'contents': contents, 'bytes': used}
 
 
 def emit_json(result, stream=None):
@@ -414,7 +473,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path)
-    parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify', 'remember'])
+    parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify', 'remember', 'index', 'read'])
     parser.add_argument('--scope', choices=['project', 'global'], default='project')
     parser.add_argument('--plan', type=Path)
     parser.add_argument('--note', action='append', default=[])
@@ -422,6 +481,9 @@ def main():
     parser.add_argument('--key')
     parser.add_argument('--value')
     parser.add_argument('--why')
+    parser.add_argument('--type', dest='kind', choices=NOTE_TYPES, default=None,
+                        help='user=identity/role, feedback=preference/rule, project=project constraint, reference=pointer')
+    parser.add_argument('--max-bytes', type=int, default=None)
     args = parser.parse_args()
     try:
         with opened(args.config, args.project) as (_, project, roots):
@@ -439,11 +501,17 @@ def main():
             elif args.command == 'remember':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')
-                result = remember(roots[args.scope], args.subject, args.key, args.value, args.why, args.scope)
+                result = remember(roots[args.scope], args.subject, args.key, args.value, args.why, args.scope, args.kind)
             elif args.command == 'verify':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')
                 result = verify(roots[args.scope], args.note)
+            elif args.command == 'index':
+                result = {'project': str(project), 'stores': bounded_index(roots, args.max_bytes or INDEX_BUDGET)}
+            elif args.command == 'read':
+                if args.scope not in roots:
+                    raise ValueError('Unavailable scope')
+                result = read_notes(roots[args.scope], args.note, args.max_bytes or MAX_BYTES)
             else:
                 result = {'project': str(project), 'stores': context(roots)}
         emit_json(result)

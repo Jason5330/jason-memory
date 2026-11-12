@@ -49,7 +49,9 @@ class DownloadTest(unittest.TestCase):
             entrance = project / 'CLAUDE.md'
             imports = [line[1:] for line in entrance.read_text(encoding='utf-8').splitlines()
                        if line.startswith('@')]
-            self.assertEqual(imports, ['.jason-memory/MEMORY.md'])
+            self.assertEqual(imports, ['.jason-memory/MEMORY.md', 'AGENTS.md'])
+            # One shared rule source for Codex and Claude (issue #9).
+            self.assertTrue((entrance.parent / 'AGENTS.md').is_file())
             self.assertEqual((entrance.parent / imports[0]).read_bytes(),
                              (project / 'templates/MEMORY.md').read_bytes())
             for tool, argument in [('jason_check.py', '.jason-memory/MEMORY.md'),
