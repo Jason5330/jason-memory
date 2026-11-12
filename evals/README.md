@@ -4,7 +4,7 @@
 `expected_output` 或本文件。使用假的測試資料，不連結真實客戶或通知服務。
 
 每個案例與版本使用不同目錄。複製待測的 `AGENTS.md`、`CLAUDE.md`、
-`SKILL.md`、`templates/`、`tools/`，以索引範本初始化 `.jason-memory/MEMORY.md`。
+`SKILL.md`、`templates/`、`tools/` 與 `.jason-memory.json`（決定前台／背景模式，缺少時會退回前台保存流程），以索引範本初始化 `.jason-memory/MEMORY.md`。
 明確讓 Agent 讀取該專案的常駐規則。原版與新版分別使用凍結的檔案快照，
 不要在執行中替換規則。這驗證載入後的規則行為，不等於驗證 host 自動載入。
 

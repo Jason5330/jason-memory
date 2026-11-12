@@ -340,6 +340,7 @@ def handle(event, config):
             if record_tool:
                 ledger.append(roots['project'], 'tool', {'tool': event.get('tool_name', ''),
                               'input': event.get('tool_input'), 'result': output}, event.get('session_id', ''))
+                ledger.maybe_dream(roots['project'], config, project, ledger_settings(config))
                 if failed or not handles:
                     return {}
             if state:
@@ -369,6 +370,8 @@ def handle(event, config):
         if name == 'Stop' and opts['enabled']:
             ledger.append(roots['project'], 'assistant', {'text': event.get('last_assistant_message', ''),
                           'stop_hook_active': bool(event.get('stop_hook_active'))}, event.get('session_id', ''))
+            # The last turn before the user leaves must still be able to start consolidation.
+            ledger.maybe_dream(roots['project'], config, project, opts)
         if (name == 'Stop' and state and state.get('fingerprint') == fingerprint
                 and state.get('files') is not None and not success_claim(event.get('last_assistant_message', ''))
                 and state.get('versions') == state.get('seen')):

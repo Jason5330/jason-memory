@@ -19,6 +19,10 @@ class Base(unittest.TestCase):
     ledger_cfg = None
 
     def setUp(self):
+        # Never start a real background worker (or a real agent CLI) from unit tests.
+        self.spawned_workers, original_spawn = [], ledger._spawn
+        ledger._spawn = self.spawned_workers.append
+        self.addCleanup(setattr, ledger, '_spawn', original_spawn)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.project = Path(self.tmp.name).resolve()
@@ -210,6 +214,10 @@ class LedgerTests(Base):
                 self.assertEqual(Path(result['blob']).read_bytes(), content)
         self.assertEqual(len(list((self.root / '.raw/blobs').iterdir())), 2)
 
+    @staticmethod
+    def owner(command):
+        return command[command.index('--owner') + 1]
+
     def test_dream_triggers_on_count_retries_and_never_reprocesses(self):
         spawned = []
         opts = ledger.settings(self.config)
@@ -223,16 +231,134 @@ class LedgerTests(Base):
             self.assertIsNone(ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append))
         self.assertEqual(len(spawned), 1)
         failing = dict(opts, dream_command=[sys.executable, '-c', 'raise SystemExit(3)'])
-        self.assertEqual(ledger.dream_run(self.config, self.project, 3, failing), 3)
+        self.assertEqual(ledger.dream_run(self.config, self.project, 3, failing, self.owner(spawned[-1])), 3)
         with runtime.opened(self.config):
             self.assertEqual(ledger.pending(self.root)['cursor'], 0)
             self.assertEqual(ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append), 3)
-        self.assertEqual(ledger.dream_run(self.config, self.project, 3, opts), 0)
+        self.assertEqual(ledger.dream_run(self.config, self.project, 3, opts, self.owner(spawned[-1])), 0)
         with runtime.opened(self.config):
             self.assertEqual(ledger.pending(self.root), dict(ledger.pending(self.root), cursor=3, pending=0))
             # No new records: nothing runs again.
             self.assertIsNone(ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append))
         self.assertEqual(len(spawned), 2)
+
+    # --- Issues #12-#16 -------------------------------------------------------
+
+    def test_threshold_reached_on_tool_or_stop_starts_worker(self):
+        """#12: the last appended record of a turn can trigger consolidation."""
+        self.config.write_text(json.dumps({'version': 1, 'mode': 'project', 'memory_root': '.jason-memory',
+                                           'ledger': {'enabled': True, 'dream_every': 2,
+                                                      'dream_command': [sys.executable, '-c', 'pass']}}),
+                               encoding='utf-8')
+        spawned, original = [], ledger._spawn
+        ledger._spawn = spawned.append
+        try:
+            self.event('SessionStart')
+            self.event('UserPromptSubmit', prompt='hello')
+            self.assertEqual(spawned, [])
+            self.event('PostToolUse', tool_name='Bash', tool_input={'command': 'echo hi'},
+                       tool_response={'stdout': 'hi'})
+            self.assertEqual(len(spawned), 1)
+            with runtime.opened(self.config):
+                ledger.release_job(self.root, self.owner(spawned[0]), 2)
+            self.event('UserPromptSubmit', prompt='again')
+            self.event('Stop', last_assistant_message='done')
+            self.assertEqual(len(spawned), 2)
+        finally:
+            ledger._spawn = original
+
+    def test_missing_executable_records_error_and_allows_retry(self):
+        """#13: a command that cannot start clears its job and records last_error."""
+        opts = dict(ledger.settings(self.config), dream_every=1,
+                    dream_command=[str(self.project / 'missing-synthetic-executable')])
+        spawned = []
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'prompt', {'text': 'x'})
+            ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append)
+        self.assertEqual(ledger.dream_run(self.config, self.project, 1, opts, self.owner(spawned[0])), 127)
+        with runtime.opened(self.config):
+            state = ledger.pending(self.root)
+            self.assertEqual((state['cursor'], state['running']), (0, None))
+            self.assertEqual(state['last_error']['code'], 127)
+            self.assertEqual(ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append), 1)
+
+    def test_spawn_failure_clears_reservation(self):
+        """#13: the outer spawn failing must not leave a running marker."""
+        opts = dict(ledger.settings(self.config), dream_every=1)
+
+        def broken(command):
+            raise PermissionError('denied')
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'prompt', {'text': 'x'})
+            self.assertIsNone(ledger.maybe_dream(self.root, self.config, self.project, opts, broken))
+            state = ledger.pending(self.root)
+        self.assertIsNone(state['running'])
+        self.assertEqual(state['last_error']['code'], 126)
+
+    def test_dead_worker_does_not_block_for_an_hour(self):
+        """#13: liveness, not only age, decides whether a job still runs."""
+        import subprocess
+        import time
+        finished = subprocess.Popen([sys.executable, '-c', 'pass'])
+        finished.wait()
+        opts = dict(ledger.settings(self.config), dream_every=1)
+        spawned = []
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'prompt', {'text': 'x'})
+            state = ledger.dream_state(self.root)
+            state['running'] = {'owner': 'gone', 'kind': 'dream', 'started': time.time(),
+                                'upto': 1, 'pid': finished.pid}
+            ledger._save_state(self.root, state)
+            self.assertEqual(ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append), 1)
+
+    def test_worker_never_clears_another_owners_job(self):
+        """#15: a stale/replaced reservation cannot finish someone else's job."""
+        opts = dict(ledger.settings(self.config), dream_every=1)
+        spawned = []
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'prompt', {'text': 'x'})
+            ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append)
+        self.assertEqual(ledger.dream_run(self.config, self.project, 1, opts, 'not-the-owner'), 75)
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['running']['owner'], self.owner(spawned[0]))
+
+    def test_corrupted_ledger_is_never_sent_to_the_model(self):
+        """#16: edited, deleted and reordered records stop consolidation before the agent runs."""
+        import memory_dream as dream
+        path = self.root / '.raw/ledger.jsonl'
+        with runtime.opened(self.config):
+            for text in ('Please use short answers', 'second', 'third'):
+                ledger.append(self.root, 'prompt', {'text': text})
+        original = path.read_text(encoding='utf-8').splitlines()
+        tampered = {
+            'edit': [original[0].replace('short', 'long')] + original[1:],
+            'delete': [original[0], original[2]],
+            'reorder': [original[1], original[0], original[2]],
+        }
+        command = dict(ledger.settings(self.config), dream_command=[sys.executable, '-c', 'pass'])
+        for name, lines in tampered.items():
+            with self.subTest(name=name):
+                path.write_text(chr(10).join(lines) + chr(10), encoding='utf-8')
+                captured = []
+                code = dream.consolidate(self.config, self.project, 1, 3, ledger.settings(self.config),
+                                         lambda cmd, text: captured.append(text) or 0)
+                self.assertEqual((code, captured), (65, []))
+                self.assertEqual(ledger.dream_run(self.config, self.project, 3, command), 65)
+                with runtime.opened(self.config):
+                    self.assertEqual(ledger.pending(self.root)['cursor'], 0)
+
+    def test_truncation_below_cursor_is_detected(self):
+        """#16 follow-up: the checkpoint taken when the cursor advanced detects tail truncation."""
+        with runtime.opened(self.config):
+            for text in ('a', 'b', 'c'):
+                ledger.append(self.root, 'prompt', {'text': text})
+            owner = ledger.claim_job(self.root, 'dream', 3)
+            ledger.release_job(self.root, owner, 3)
+        path = self.root / '.raw/ledger.jsonl'
+        path.write_text(chr(10).join(path.read_text(encoding='utf-8').splitlines()[:2]) + chr(10), encoding='utf-8')
+        with runtime.opened(self.config):
+            with self.assertRaisesRegex(ValueError, 'truncated'):
+                ledger.verified_records(self.root)
 
     def test_disabled_ledger_writes_nothing(self):
         self.config.write_text('{"version":1,"mode":"project","memory_root":".jason-memory"}', encoding='utf-8')
@@ -318,9 +444,13 @@ class BackgroundModeTests(Base):
         before = (self.root / '.raw/ledger.jsonl').read_bytes()
 
         def worker(cmd, text):
+            # The agent writes to the staging store named in its prompt, never the live one.
+            import re
             self.assertIn('更正：標題改用淡紫色', text)
-            with runtime.opened(self.config):
-                runtime.remember(self.root, 'user', 'header.color', '淡紫色', '來源：ledger seq 2')
+            staging = Path(re.search(r"--config '?([^'\s]+\.jason-memory\.json)", text).group(1))
+            self.assertNotEqual(staging.resolve(), self.config.resolve())
+            with runtime.opened(staging) as (_, _, roots):
+                runtime.remember(roots['project'], 'user', 'header.color', '淡紫色', '來源：ledger seq 2')
             return 0
         result = dream.rebuild(self.config, self.project, ledger.settings(self.config), worker)
         os.environ.pop('JASON_DREAM', None)
@@ -332,6 +462,63 @@ class BackgroundModeTests(Base):
         self.assertEqual((self.root / '.raw/ledger.jsonl').read_bytes(), before)
         with runtime.opened(self.config):
             self.assertEqual(ledger.pending(self.root)['cursor'], 2)
+
+    def test_rebuild_failure_keeps_current_notes_and_exits_nonzero(self):
+        """#14: archive/swap happens only after a successful rebuild; failure is reported."""
+        import os
+        import subprocess
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='標題用淺藍色')
+        os.environ['JASON_DREAM'] = '1'
+        try:
+            with runtime.opened(self.config):
+                runtime.remember(self.root, 'user', 'header.color', '淺藍色', '來源：ledger seq 1')
+        finally:
+            del os.environ['JASON_DREAM']
+        before = runtime.notes(self.root)
+        cfg = json.loads(self.config.read_text(encoding='utf-8'))
+        cfg['ledger']['dream_agent'] = [sys.executable, '-c',
+                                        'import sys; print("JASON_DREAM_STATUS: failed"); sys.exit(7)']
+        self.config.write_text(json.dumps(cfg), encoding='utf-8')
+        cli = subprocess.run([sys.executable, str(ROOT / 'tools/memory_dream.py'), '--config', str(self.config),
+                              '--project', str(self.project), 'rebuild', '--yes'],
+                             capture_output=True, text=True, encoding='utf-8', env=dict(os.environ, PYTHONUTF8='1'))
+        self.assertEqual(cli.returncode, 7, cli.stdout + cli.stderr)
+        self.assertIn('current notes kept', cli.stdout)
+        self.assertEqual(runtime.notes(self.root), before)
+        with runtime.opened(self.config):
+            state = ledger.pending(self.root)
+        self.assertIsNone(state['running'])
+        self.assertEqual(state['last_error']['code'], 7)
+        self.assertEqual(list((self.root / '.raw').glob('rebuild-*')), [])
+        for agent, code in [('no-such-agent', 127), ([sys.executable, '-c', 'print("done")'], 75)]:
+            with self.subTest(agent=agent):
+                result = dream.rebuild(self.config, self.project, dict(ledger.settings(self.config), dream_agent=agent))
+                self.assertEqual(result['exit_code'], code)
+                self.assertEqual(runtime.notes(self.root), before)
+
+    def test_rebuild_and_dream_worker_are_mutually_exclusive(self):
+        """#15: rebuild holds the consolidation slot; a running worker blocks rebuild."""
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='x')
+        opts = dict(ledger.settings(self.config), dream_every=1)
+        spawned = []
+
+        def probe(cmd, text):
+            with runtime.opened(self.config):
+                self.assertEqual(ledger.pending(self.root)['running']['kind'], 'rebuild')
+                self.assertIsNone(ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append))
+            return 0
+        self.assertEqual(dream.rebuild(self.config, self.project, opts, probe)['exit_code'], 0)
+        self.assertEqual(spawned, [])
+        with runtime.opened(self.config):
+            self.assertIsNone(ledger.pending(self.root)['running'])
+            ledger.append(self.root, 'prompt', {'text': 'y'})
+            ledger.maybe_dream(self.root, self.config, self.project, opts, spawned.append)
+        blocked = dream.rebuild(self.config, self.project, opts, lambda cmd, text: 0)
+        self.assertEqual(blocked['exit_code'], 75)
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['running']['kind'], 'dream')
 
     def test_exact_lookup_in_raw_ledger(self):
         self.event('UserPromptSubmit', prompt='錯誤碼是 E-4096-XY，報價 12,345.67 元')

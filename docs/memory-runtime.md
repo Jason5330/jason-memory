@@ -189,14 +189,21 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   找確切句子、數字或錯誤訊息。筆記求快，帳本求準。
 - **文件鏡像**：`mirror --file 路徑` 把文件逐位元組存到 `.raw/blobs/<sha256>`，
   帳本記錄來源路徑、大小與指紋；同內容只存一份，不改動原件。
-- **背景整理（做夢）**：未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作時，以分離程序啟動
+- **背景整理（做夢）**：每次追加紀錄（提示、工具、回覆）後，未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作時，以分離程序啟動
   `dream-run`，前台不等待。worker 把紀錄與現有索引交給 Agent CLI（環境變數 `JASON_DREAM=1`，
   只有它能寫入），由它用 `remember`／`apply` 保存並在 `--why` 或正文寫明「來源：ledger seq N」。
   Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
   成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error` 並於下次觸發重試；
   沒有新紀錄不重跑。`memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
-- **重建**：`python tools/memory_dream.py --config .jason-memory.json rebuild --yes` 把現有筆記全部
-  封存（不刪除），游標歸零，從整份帳本重新整理；帳本本身不變。換用更強的模型後可以這樣重整。
+- **重建**：`python tools/memory_dream.py --config .jason-memory.json rebuild --yes` 先在
+  `.raw/rebuild-*` 暫存庫從整份帳本重新整理，成功後才替換現行筆記（舊筆記封存）；失敗時現行筆記
+  不變、回傳非零 exit code 並記 `last_error`。帳本本身不變。換用更強的模型後可以這樣重整。
+- **單一整理工作**：一般整理與重建共用 `dream.json` 的 `running` 欄位（含擁有者識別碼與程序 pid），
+  同一時間只有一個；程序已結束或超過一小時即不再阻擋。只有擁有者能清除自己的標記；
+  啟動失敗（找不到執行檔、權限不足）也會清除並記錄錯誤，下次觸發重試。
+- **來源完整性**：每次整理前重算整條雜湊鏈，並比對游標推進時記下的 checkpoint（`cursor_hash`），
+  偵測修改、刪除、重排與游標以下的截斷；不通過就不交給模型、不推進游標（代碼 65）。
+  帳本尾端尚未整理部分的截斷，仍需外部備份才能察覺。
 
 限制：Claude hook 只對 Shell 類工具記錄 PostToolUse；其他工具的結果只透過助理回覆間接保留。
 背景整理品質取決於所用的模型與權限（`claude -p` 只允許執行 python 與讀檔）；本框架負責觸發、

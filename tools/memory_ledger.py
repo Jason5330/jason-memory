@@ -21,6 +21,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import uuid
 
 import memory_facts
 import memory_runtime as runtime
@@ -165,6 +166,9 @@ def search(root, text, limit=20):
 
 
 # --- Dreaming ----------------------------------------------------------------
+# One consolidation job at a time per store. The job (normal dream-run or rebuild) is recorded
+# in dream.json with an owner token; only that owner may clear it. A job whose process is gone or
+# which is older than STALE_SECONDS no longer blocks new work.
 
 def _state_path(root):
     return raw_root(root) / 'dream.json'
@@ -188,24 +192,108 @@ def pending(root):
             'running': state.get('running'), 'last_error': state.get('last_error')}
 
 
+def _alive(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if os.name == 'nt':
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel.CloseHandle(handle)
+        return bool(ok) and code.value == 259  # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _running(state):
     run = state.get('running')
-    return bool(run) and time.time() - run.get('started', 0) < STALE_SECONDS
+    if not run or time.time() - run.get('started', 0) >= STALE_SECONDS:
+        return False
+    return _alive(run['pid']) if run.get('pid') else True  # No pid yet: the job is still starting.
+
+
+def claim_job(root, kind, upto):
+    """Reserve the store's single consolidation slot. Caller holds the writer lock."""
+    state = dream_state(root)
+    if _running(state):
+        return None
+    owner = uuid.uuid4().hex
+    state['running'] = {'owner': owner, 'kind': kind, 'started': time.time(), 'upto': upto,
+                        'pid': os.getpid() if kind == 'rebuild' else None}
+    _save_state(root, state)
+    return owner
+
+
+def release_job(root, owner, upto=None, error=None):
+    """Finish a job: advance the cursor on success, record the error otherwise. Never clears
+    another owner's job."""
+    state = dream_state(root)
+    if (state.get('running') or {}).get('owner') == owner:
+        state.pop('running', None)
+    if error is None and upto is not None:
+        existing = records(root)
+        if upto > state['cursor'] and upto <= len(existing):
+            state['cursor'] = upto
+            state['cursor_hash'] = existing[upto - 1]['hash']
+        state.pop('last_error', None)
+        state['last_success'] = time.time()
+    elif error is not None:
+        state['last_error'] = dict(error, at=time.time(), upto=upto)
+    _save_state(root, state)
+
+
+def verified_records(root):
+    """Records after a full chain check and a check that nothing at or below the consolidated
+    cursor was truncated or rewritten (checkpoint stored when the cursor advanced)."""
+    verify(root)
+    existing = records(root)
+    state = dream_state(root)
+    cursor = state['cursor']
+    if cursor:
+        if len(existing) < cursor:
+            raise ValueError('Ledger truncated below the consolidated cursor (' + str(cursor) + ')')
+        if state.get('cursor_hash') and existing[cursor - 1]['hash'] != state['cursor_hash']:
+            raise ValueError('Ledger rewritten below the consolidated cursor (' + str(cursor) + ')')
+    return existing
 
 
 def maybe_dream(root, config, project, opts, spawn=None):
-    """Start a detached worker once enough new records exist. Never blocks the foreground."""
+    """Start a detached worker once enough new records exist. Never blocks the foreground.
+    Caller holds the writer lock."""
     if not opts.get('enabled') or not opts.get('dream_command'):
         return None
     state = dream_state(root)
     head = len(records(root))
     if head - state['cursor'] < opts['dream_every'] or _running(state):
         return None
-    state['running'] = {'started': time.time(), 'upto': head}
-    _save_state(root, state)
+    owner = claim_job(root, 'dream', head)
+    if owner is None:
+        return None
     command = [sys.executable, str(Path(__file__).resolve()), '--config', str(config),
-               '--project', str(project), 'dream-run', '--upto', str(head)]
-    (spawn or _spawn)(command)
+               '--project', str(project), 'dream-run', '--upto', str(head), '--owner', owner]
+    try:
+        process = (spawn or _spawn)(command)
+    except OSError as exc:
+        release_job(root, owner, head, {'code': 126, 'error': 'spawn failed: ' + type(exc).__name__})
+        return None
+    if getattr(process, 'pid', None):
+        state = dream_state(root)
+        if (state.get('running') or {}).get('owner') == owner:
+            state['running']['pid'] = process.pid
+            _save_state(root, state)
     return head
 
 
@@ -216,29 +304,42 @@ def _spawn(command):
         kwargs['creationflags'] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
     else:
         kwargs['start_new_session'] = True
-    subprocess.Popen(command, **kwargs)
+    return subprocess.Popen(command, **kwargs)
 
 
-def dream_run(config, project, upto, opts):
-    """Run the consolidation command for records (cursor, upto]; advance the cursor only on success."""
+def dream_run(config, project, upto, opts, owner=None):
+    """Run the consolidation command for records (cursor, upto]; advance the cursor only on success.
+    Every failure path (bad ledger, missing executable, non-zero exit) clears this job and records
+    last_error so the next trigger retries."""
     with runtime.opened(config, project) as (_, _, roots):
         root = roots['project']
+        if owner is None:
+            owner = claim_job(root, 'dream', upto)
+            if owner is None:
+                return 75  # Another job is running; try again later.
+        elif (dream_state(root).get('running') or {}).get('owner') != owner:
+            return 75  # Our reservation was replaced (stale); do not race the new owner.
         start = dream_state(root)['cursor']
+        try:
+            existing = verified_records(root)
+        except ValueError as exc:
+            release_job(root, owner, upto, {'code': 65, 'error': str(exc)})
+            return 65
+        upto = min(upto, len(existing))
     env = dict(os.environ, JASON_DREAM='1', JASON_MEMORY_CONFIG=str(config), JASON_MEMORY_PROJECT=str(project),
                JASON_DREAM_FROM=str(start + 1), JASON_DREAM_UPTO=str(upto), JASON_MEMORY_ROOT=str(root))
-    # The command runs outside the writer lock so foreground recall and saves never wait for it.
-    code = subprocess.call(opts['dream_command'], env=env, cwd=str(project),
-                           stdin=subprocess.DEVNULL) if upto > start else 0
+    error = None
+    if upto > start:
+        # The command runs outside the writer lock so foreground recall and saves never wait for it.
+        try:
+            code = subprocess.call(opts['dream_command'], env=env, cwd=str(project), stdin=subprocess.DEVNULL)
+        except OSError as exc:
+            code = 127
+            error = 'cannot start dream_command: ' + type(exc).__name__
+    else:
+        code = 0
     with runtime.opened(config, project) as (_, _, roots):
-        state = dream_state(root)
-        state.pop('running', None)
-        if code == 0:
-            state['cursor'] = max(state['cursor'], upto)
-            state.pop('last_error', None)
-            state['last_success'] = time.time()
-        else:
-            state['last_error'] = {'code': code, 'at': time.time(), 'upto': upto}
-        _save_state(root, state)
+        release_job(root, owner, upto, None if code == 0 else {'code': code, 'error': error or 'exit code'})
     return code
 
 
@@ -254,11 +355,12 @@ def main():
     parser.add_argument('--file', type=Path)
     parser.add_argument('--text')
     parser.add_argument('--upto', type=int)
+    parser.add_argument('--owner')
     args = parser.parse_args()
     try:
         if args.command == 'dream-run':
             cfg, project, _, _ = runtime.configuration(args.config, args.project)
-            return dream_run(args.config.absolute(), project, args.upto, settings(args.config))
+            return dream_run(args.config.absolute(), project, args.upto, settings(args.config), args.owner)
         with runtime.opened(args.config, args.project) as (_, _, roots):
             root = roots['project']
             if args.command == 'append':

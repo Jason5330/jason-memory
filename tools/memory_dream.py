@@ -112,14 +112,23 @@ def agent_command(opts):
     return None
 
 
-def consolidate(config, project, start, upto, opts, runner=None):
-    """Feed records start..upto to the agent. Non-zero means retry later; the cursor stays."""
+def consolidate(config, project, start, upto, opts, runner=None, target=None):
+    """Feed records start..upto to the agent. Non-zero means retry later; the cursor stays.
+    The ledger is verified first; a broken or truncated source is never handed to a model.
+    `target` is the memory config the agent writes to (defaults to `config`)."""
     with runtime.opened(config, project) as (cfg, project, roots):
         root = roots['project']
-        records = [r for r in ledger.records(root) if start <= r['seq'] <= upto
+        try:
+            existing = ledger.verified_records(root)
+        except ValueError as exc:
+            print('Jason-memory dream: ledger verification failed: ' + str(exc), file=sys.stderr)
+            return 65
+        records = [r for r in existing if start <= r['seq'] <= upto
                    and r.get('kind') in ('prompt', 'assistant', 'tool', 'document', 'correction')]
-        index_text = '\n\n'.join(scope + ':\n' + runtime.read_index(r) for scope, r in roots.items())
-        prefix = runtime_prefix(config, project, cfg)
+    target = Path(target or config)
+    with runtime.opened(target, project) as (tcfg, _, troots):
+        index_text = '\n\n'.join(scope + ':\n' + runtime.read_index(r) for scope, r in troots.items())
+        prefix = runtime_prefix(target, project, tcfg)
     if not records:
         return 0
     command = agent_command(opts) if runner is None else ['injected-runner']
@@ -129,7 +138,11 @@ def consolidate(config, project, start, upto, opts, runner=None):
     env = dict(os.environ, JASON_DREAM='1')
     run = runner or (lambda cmd, text: _run_agent(cmd, text, env, project))
     for lines in chunks(records):
-        code = run(command, build_prompt(lines, index_text, prefix))
+        try:
+            code = run(command, build_prompt(lines, index_text, prefix))
+        except (OSError, subprocess.SubprocessError) as exc:
+            print('Jason-memory dream: agent failed to run: ' + type(exc).__name__, file=sys.stderr)
+            return 127 if isinstance(exc, OSError) else 124
         if code:
             return code
     return 0
@@ -148,26 +161,61 @@ def _run_agent(command, text, env, project):
 
 
 def rebuild(config, project, opts, runner=None):
-    """Archive every derived note, reset the cursor and consolidate the whole ledger again."""
-    os.environ['JASON_DREAM'] = '1'
+    """Re-derive all notes from the whole ledger in a staging store, then swap them in.
+    The current notes stay untouched unless the rebuild succeeds; old notes are archived on swap.
+    Holds the store's single consolidation slot, so it never overlaps a dream worker."""
+    result = {'rebuilt': False, 'archived': [], 'records': 0}
+    if runner is None and agent_command(opts) is None:
+        return dict(result, exit_code=127, error='no agent CLI found (claude/codex); current notes kept')
     with runtime.opened(config, project) as (_, project, roots):
         root = roots['project']
-        ledger.verify(root)
-        names = sorted(runtime.notes(root))
-        if names:
-            runtime.apply(root, {'expected_revision': runtime.revision(root), 'updates': {}, 'retire': names})
-        state = ledger.dream_state(root)
-        state['cursor'] = 0
-        state.pop('running', None)
-        ledger._save_state(root, state)
-        head = len(ledger.records(root))
-    code = consolidate(config, project, 1, head, opts, runner)
-    if code == 0:
+        try:
+            head = len(ledger.verified_records(root))
+        except ValueError as exc:
+            return dict(result, exit_code=65, error='ledger verification failed: ' + str(exc))
+        owner = ledger.claim_job(root, 'rebuild', head)
+        if owner is None:
+            return dict(result, exit_code=75, error='another consolidation job is running; retry later')
+        staging = runtime.storelib.safe(ledger.raw_root(root) / ('rebuild-' + owner), root)
+        staging.mkdir()
+        staging_config = staging / '.jason-memory.json'
+        staging_config.write_text('{"version": 1, "mode": "project", "memory_root": "store"}', encoding='utf-8')
+    result['records'] = head
+    previous = os.environ.get('JASON_DREAM')
+    os.environ['JASON_DREAM'] = '1'
+    error = None
+    try:
+        code = consolidate(config, project, 1, head, opts, runner, target=staging_config)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        code, error = 1, str(exc)
+    finally:
+        if previous is None:
+            os.environ.pop('JASON_DREAM', None)
+        else:
+            os.environ['JASON_DREAM'] = previous
+    try:
         with runtime.opened(config, project) as (_, _, roots):
-            state = ledger.dream_state(roots['project'])
-            state['cursor'] = head
-            ledger._save_state(roots['project'], state)
-    return {'archived': names, 'records': head, 'exit_code': code}
+            if code == 0:
+                try:
+                    rebuilt = runtime.notes(staging / 'store')
+                    current = runtime.notes(root)
+                    retire = sorted(n for n in current if n not in rebuilt)
+                    updates = {n: c for n, c in rebuilt.items() if current.get(n) != c}
+                    if updates or retire:
+                        runtime.apply(root, {'expected_revision': runtime.revision(root),
+                                             'updates': updates, 'retire': retire})
+                    result.update(archived=sorted(set(retire) | {n for n in updates if n in current}))
+                except (OSError, ValueError, KeyError, TypeError) as exc:
+                    code, error = 1, 'swap failed: ' + str(exc)
+            ledger.release_job(root, owner, head, None if code == 0 else
+                               {'code': code, 'error': 'rebuild failed; current notes kept' +
+                                (': ' + error if error else '')})
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    result.update(exit_code=code, rebuilt=code == 0)
+    if code:
+        result['error'] = (error or 'agent did not finish') + '; current notes kept unchanged'
+    return result
 
 
 def main():
@@ -184,8 +232,9 @@ def main():
         if args.command == 'rebuild':
             if not args.yes:
                 raise ValueError('rebuild archives all current notes; rerun with --yes')
-            runtime.emit_json(rebuild(config, project, opts))
-            return 0
+            result = rebuild(config, project, opts)
+            runtime.emit_json(result)
+            return result['exit_code']
         start = int(os.environ.get('JASON_DREAM_FROM', '1'))
         upto = int(os.environ.get('JASON_DREAM_UPTO', '0'))
         if args.command == 'prompt':
