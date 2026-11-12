@@ -10,12 +10,18 @@
 預設一次處理：
 
 - BAT 所在資料夾：依 `.jason-memory.json` 清除本專案記憶庫，包括索引、筆記、
-  封存、收據與 hook 狀態；移除 Jason-memory hooks 與可辨識的框架檔案。
+  封存、收據、hook 狀態，以及原始帳本、文件鏡像與背景整理狀態（`.raw/`）；移除 Jason-memory hooks 與可辨識的框架檔案。
 - 目前 Windows 使用者：清除 `.jason-memory-global` 內的框架、全局記憶，
   **以及該全局庫保存的所有專案記憶**。也會辨識全局入口記載的自訂安裝路徑。
   自訂安裝目錄原有的其他檔案會保留，只刪除框架已安裝的檔案與專用記憶庫。
 - Codex、Claude Code：移除 Jason-memory 管理區塊、hooks 及可辨識的安裝備份；
   保留其他規則、設定、hooks、登入資訊。支援 `CODEX_HOME`、`CLAUDE_CONFIG_DIR`。
+- Codex `config.toml`：只移除指向 `codex_notify.py` 的那一行 `notify`，其他設定不變；
+  若該設定寫成多行等無法確定的形式，會保留並列在 `remaining`，請手動刪除。
+- 也會清除舊版安裝寫在 `CLAUDE.md` 的 Jason-memory 管理區塊（新版已不使用 `CLAUDE.md`）。
+
+**背景整理執行中時不會清除。** 若偵測到仍在運作的背景整理程序，清除工具會在刪除任何檔案前停止並說明，
+等它結束（或關閉該程序）後再執行一次即可。
 
 不會掃描其他硬碟或專案資料夾。不處理其他副本、舊 ZIP、AI 聊天紀錄、Claude
 原生記憶庫、雲端資料或 Git 歷史。另一份獨立專案版的記憶，要在那份資料夾另外清除。

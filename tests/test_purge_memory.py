@@ -262,6 +262,37 @@ class PurgeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.project / '.jason-memory').exists())
 
+    def test_codex_notify_line_removed_other_settings_kept(self):
+        config = self.profile / '.codex/config.toml'
+        script = (self.project / 'tools/codex_notify.py').as_posix()
+        self.put(config, b'model = "x"\r\nnotify = ["python", "' + script.encode() + b'"]\r\n[profiles.a]\r\nk = 1\r\n')
+        self.run_cli(self.project / 'tools/purge_memory.py')
+        self.assertEqual(config.read_bytes(), b'model = "x"\r\n[profiles.a]\r\nk = 1\r\n')
+        self.assertFalse((self.project / 'tools/codex_notify.py').exists())
+
+    def test_unrecognized_notify_reference_is_reported_not_guessed(self):
+        config = self.profile / '.codex/config.toml'
+        original = b'notify = [\n  "python",\n  "/x/tools/codex_notify.py",\n]\n'
+        self.put(config, original)
+        result = self.run_cli(self.project / 'tools/purge_memory.py', code=2)
+        self.assertIn('codex_notify.py referenced', result.stdout)
+        self.assertEqual(config.read_bytes(), original)
+
+    def test_running_background_worker_blocks_cleanup(self):
+        import time
+        state = self.project / '.jason-memory/.raw/dream.json'
+        self.put(state, json.dumps({'cursor': 0, 'running': {
+            'owner': 'x', 'kind': 'dream', 'started': time.time(), 'upto': 1, 'pid': os.getpid()}}).encode())
+        before = self.snapshot()
+        result = self.run_cli(self.project / 'tools/purge_memory.py', code=1)
+        self.assertIn('consolidation is running', result.stderr)
+        self.assertEqual(self.snapshot(), before)
+        finished = json.loads(state.read_text(encoding='utf-8'))
+        finished['running']['pid'] = 2 ** 22 + 12345  # Not a live process.
+        state.write_text(json.dumps(finished), encoding='utf-8')
+        self.run_cli(self.project / 'tools/purge_memory.py')
+        self.assertFalse((self.project / '.jason-memory').exists())
+
 
 if __name__ == '__main__':
     unittest.main()

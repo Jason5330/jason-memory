@@ -8,6 +8,7 @@ from pathlib import Path, PureWindowsPath
 import re
 import sys
 import tempfile
+import time
 
 sys.dont_write_bytecode = True  # --dry-run must not create even a helper cache.
 import hook_settings
@@ -107,7 +108,7 @@ class Plan:
             if safe(path).read_bytes() != original:
                 raise ValueError('File changed during preflight; retry: ' + str(path))
         # Detach entrances/hooks before deleting framework executables or memories.
-        entrances = {'AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md', 'settings.json',
+        entrances = {'AGENTS.md', 'AGENTS.override.md', 'CLAUDE.md', 'settings.json', 'config.toml',
                      'settings.local.json', '.jason-memory.json'}
         ordered = sorted(self.files.items(), key=lambda item: (
             item[0].name not in entrances, item[1][1] is None))
@@ -176,12 +177,75 @@ def clean_backups(plan, directory, names, project=False):
                     plan.remaining.append(str(path) + ' (backup ownership uncertain; preserved)')
 
 
+NOTIFY_LINE = re.compile(rb'^[ \t]*notify[ \t]*=[ \t]*\[[^\r\n]*codex_notify\.py[^\r\n]*\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)', re.M)
+
+
+def clean_codex_notify(plan, target):
+    """Remove only the single `notify = [...codex_notify.py...]` line the docs told users to add."""
+    target = safe(target)
+    if not target.is_file():
+        return
+    data = target.read_bytes()
+    if b'codex_notify.py' not in data:
+        return
+    updated = NOTIFY_LINE.sub(b'', data)
+    if b'codex_notify.py' in updated:
+        plan.remaining.append(str(target) + ' (codex_notify.py referenced in an unrecognized form; edit manually)')
+    if updated != data:
+        plan.file(target, updated)
+
+
+def _alive(pid):
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if os.name == 'nt':
+        import ctypes
+        kernel = ctypes.windll.kernel32
+        handle = kernel.OpenProcess(0x1000, False, pid)
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = kernel.GetExitCodeProcess(handle, ctypes.byref(code))
+        kernel.CloseHandle(handle)
+        return bool(ok) and code.value == 259
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def check_no_running_worker(memory):
+    """A live background consolidation would recreate the store after deletion; stop first."""
+    memory = safe(memory)
+    if not memory.is_dir():
+        return
+    for state in memory.rglob('.raw/dream.json'):
+        try:
+            running = json.loads(safe(state).read_text(encoding='utf-8-sig')).get('running') or {}
+        except (OSError, ValueError):
+            continue
+        if not running:
+            continue
+        fresh = time.time() - float(running.get('started', 0)) < 3600
+        if fresh and (_alive(running['pid']) if running.get('pid') else True):
+            raise ValueError('Background memory consolidation is running (' + str(state) +
+                             '); wait for it to finish or end it, then retry. Nothing was removed.')
+
+
 def clean_global(plan, home):
     # A custom installation home may predate this framework and contain user files.
     # Delete the owned memory subtree and exact installed files, never the whole home.
     memory = safe(home / 'memory')
     if memory.exists() and not safe(memory / 'shared/MEMORY.md').is_file():
         raise ValueError('Cannot identify global memory subtree: ' + str(memory))
+    check_no_running_worker(memory)
     plan.tree(memory)
     framework = safe(home / 'framework')
     for name in GLOBAL_FILES:
@@ -219,6 +283,7 @@ def make_plan(args):
         for name in names:
             homes.update(safe(p) for p in clean_rules(plan, directory / name))
         clean_backups(plan, directory, names + ('settings.json',))
+    clean_codex_notify(plan, codex / 'config.toml')
     clean_settings(plan, claude / 'settings.json')
     clean_settings(plan, claude / 'settings.local.json')
     protected = {root, profile, codex, claude, Path(root.anchor)}
@@ -245,6 +310,7 @@ def make_plan(args):
             raise ValueError('Unsafe project memory root: ' + str(memory))
         if memory.exists() and not safe(memory / 'MEMORY.md').is_file():
             raise ValueError('Missing memory index; cannot verify store: ' + str(memory))
+        check_no_running_worker(memory)
         plan.tree(memory)
         plan.file(config)
     clean_settings(plan, root / '.claude/settings.json')
