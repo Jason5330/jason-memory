@@ -12,6 +12,12 @@
 
 **主動讀取、主動判斷需求、主動記錄、寫入後健檢並通報。** 使用者不必說「記住」，AI 也應自行保存有依據、未來有用的需求與經驗。不需要資料庫或伺服器；新版提供 Claude hooks 與一致性寫入工具，預設也沒有固定的索引行數／位元組門檻。
 
+**dream-20261112 版：背景記憶模式（預設）。** 前台只管做事、不寫記憶、不通知「已記住」；
+對話自動記入只追加的原始帳本，累積 20 筆後由背景 Agent（自動偵測 Claude Code／Codex CLI）
+整理成附來源的筆記，下一輪起生效。可 `rebuild` 從帳本重建，精確原文用 `search` 回查帳本。
+Codex 需在 `~/.codex/config.toml` 設定 `notify`，見 [runtime 協議](docs/memory-runtime.md#原始帳本鏡像與背景整理)。
+想要舊的「當輪保存並通知」，把 `.jason-memory.json` 的 `foreground_writes` 改為 `true`。
+
 **ledger-20261112 版：** 依參考影片的四層做法調整。新會話只帶小索引與常駐偏好，
 其他筆記用 `index`／`read --note` 按需讀取，PARTIAL 不再輸出整庫；可選的
 [原始帳本與背景整理](docs/memory-runtime.md#原始帳本鏡像與背景整理)（只追加、雜湊鏈、可重播，

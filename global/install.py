@@ -21,6 +21,8 @@ FILES = {
     "tools/memory_facts.py": "tools/memory_facts.py",
     "tools/memory_runtime.py": "tools/memory_runtime.py",
     "tools/memory_ledger.py": "tools/memory_ledger.py",
+    "tools/memory_dream.py": "tools/memory_dream.py",
+    "tools/codex_notify.py": "tools/codex_notify.py",
     "tools/claude_memory_hook.py": "tools/claude_memory_hook.py",
     "tools/hook_settings.py": "tools/hook_settings.py",
     "global/SKILL.md": "SKILL.md",

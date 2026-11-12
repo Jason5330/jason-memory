@@ -19,7 +19,7 @@ KEEP = {'UNINSTALL.bat', 'tools/purge_memory.py', 'tools/hook_settings.py',
         'uninstall-manifest.json', 'docs/uninstall.md'}
 # Exact destinations owned by global/install.py, including its generated config.
 GLOBAL_FILES = (
-    'docs/memory-runtime.md', 'tools/memory_facts.py', 'tools/memory_runtime.py', 'tools/memory_ledger.py',
+    'docs/memory-runtime.md', 'tools/memory_facts.py', 'tools/memory_runtime.py', 'tools/memory_ledger.py', 'tools/memory_dream.py', 'tools/codex_notify.py',
     'tools/claude_memory_hook.py', 'tools/hook_settings.py', 'SKILL.md',
     'global_store.py', 'templates/MEMORY.md', 'tools/jason_check.py',
     'tools/jason_doctor.py', 'memory-config.json',

@@ -1,5 +1,11 @@
 {
   "version": 1,
   "mode": "project",
-  "memory_root": ".jason-memory"
+  "memory_root": ".jason-memory",
+  "ledger": {
+    "enabled": true,
+    "foreground_writes": false,
+    "dream_every": 20,
+    "dream_agent": "auto"
+  }
 }

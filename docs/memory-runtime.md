@@ -165,30 +165,42 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 ## 原始帳本、鏡像與背景整理
 
 參考影片的做法：原始紀錄是唯一事實來源，前台只管做事，整理放到背景，依新增紀錄量觸發。
-預設關閉；在 `.jason-memory.json` 加入：
+本專案預設就是**背景記憶模式**（`.jason-memory.json`）：
 
 ```json
 {"version": 1, "mode": "project", "memory_root": ".jason-memory",
- "ledger": {"enabled": true, "dream_every": 20,
-            "dream_command": ["claude", "-p", "依 JASON_DREAM_FROM..JASON_DREAM_UPTO 的原始紀錄整理記憶"]}}
+ "ledger": {"enabled": true, "foreground_writes": false, "dream_every": 20, "dream_agent": "auto"}}
 ```
 
-- **帳本** `.jason-memory/.raw/ledger.jsonl`：hook 依序追加使用者提示、Shell 工具呼叫與結果、
-  助理最終回覆。每筆有 `seq`、`prev`、`hash`，只用 O_APPEND 追加；`memory_ledger.py verify`
-  重算雜湊鏈，任何修改、刪除、重排都會報錯。對話中的憑證值寫入前會遮蔽為 `[REDACTED]`。
+| 設定 | 說明 |
+|---|---|
+| `enabled` | 開啟原始帳本 |
+| `foreground_writes` | `false`：前台 `remember`／`apply` 一律拒絕（`NOT SAVED: background memory mode`），不需當輪通知；`true`：回到前台保存＋通知的舊流程 |
+| `dream_every` | 累積幾筆未整理紀錄就啟動背景整理 |
+| `dream_agent` | `auto`（先找 `claude` 再找 `codex`）、`claude`、`codex`，或自訂指令陣列；提示由 stdin 傳入 |
+| `dream_command` | 進階：完全取代預設 worker（`tools/memory_dream.py consolidate`） |
+
+- **前台**：Claude 由 hooks 自動追加使用者提示、Shell 工具呼叫與結果、助理最終回覆；Codex 在
+  `~/.codex/config.toml` 加 `notify = ["python", "<絕對路徑>/tools/codex_notify.py"]`，每輪結束追加。
+  前台模型只收到「不要寫記憶、不要說已記住」的指示；說了「已記住」會被 Stop hook 要求更正。
+- **帳本** `.jason-memory/.raw/ledger.jsonl`：只用 O_APPEND 追加，雜湊鏈防竄改，格式見
+  [帳本格式](ledger-format.md)。`memory_ledger.py verify` 重算雜湊鏈；憑證值寫入前遮蔽為 `[REDACTED]`。
 - **重播／精確查詢**：`replay [--session ID]` 按原順序取回事件；`search --text 原文`
-  找確切句子、數字或錯誤訊息。Wiki／筆記求快，帳本求準。
+  找確切句子、數字或錯誤訊息。筆記求快，帳本求準。
 - **文件鏡像**：`mirror --file 路徑` 把文件逐位元組存到 `.raw/blobs/<sha256>`，
   帳本記錄來源路徑、大小與指紋；同內容只存一份，不改動原件。
-- **背景整理（做夢）**：每次追加後若未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作，
-  hook 以分離程序啟動 `dream-run`，前台不等待。`dream_command` 在鎖外執行，環境變數
-  `JASON_DREAM_FROM`／`JASON_DREAM_UPTO`／`JASON_MEMORY_CONFIG` 指定範圍。成功才推進游標，
-  失敗記 `last_error` 並於下次觸發重試；沒有新紀錄不重跑。`pending` 查看狀態。
-- **可重建**：整理工具寫出的筆記應在正文標出來源 `seq` 或文件 `sha256`。筆記寫亂時可封存，
-  由帳本重新整理；帳本與 harness 無關，可轉給其他工具使用。
+- **背景整理（做夢）**：未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作時，以分離程序啟動
+  `dream-run`，前台不等待。worker 把紀錄與現有索引交給 Agent CLI（環境變數 `JASON_DREAM=1`，
+  只有它能寫入），由它用 `remember`／`apply` 保存並在 `--why` 或正文寫明「來源：ledger seq N」。
+  Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
+  成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error` 並於下次觸發重試；
+  沒有新紀錄不重跑。`memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
+- **重建**：`python tools/memory_dream.py --config .jason-memory.json rebuild --yes` 把現有筆記全部
+  封存（不刪除），游標歸零，從整份帳本重新整理；帳本本身不變。換用更強的模型後可以這樣重整。
 
 限制：Claude hook 只對 Shell 類工具記錄 PostToolUse；其他工具的結果只透過助理回覆間接保留。
-背景整理品質取決於 `dream_command` 所用的模型，本框架只負責觸發、範圍與游標。
+背景整理品質取決於所用的模型與權限（`claude -p` 只允許執行 python 與讀檔）；本框架負責觸發、
+範圍、游標、重試與寫入權限。整理完成前，新偏好只在當前對話中有效。
 
 ## 保證與限制
 

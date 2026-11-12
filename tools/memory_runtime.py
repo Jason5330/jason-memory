@@ -27,6 +27,9 @@ MAX_BYTES = 8 * 1024 * 1024
 NOTE_TYPES = ('user', 'feedback', 'project', 'reference')
 SECRET_ERROR = ('NOT SAVED: credential-like value detected. Memory may store an environment variable '
                 'name or where the secret is kept, never the secret value itself: ')
+BACKGROUND_ERROR = ('NOT SAVED: background memory mode. The foreground agent does not write memory; '
+                    'this turn is already recorded in the raw ledger and will be consolidated in the '
+                    'background. Do not tell the user it was remembered.')
 INDEX_BUDGET = 6000  # UTF-8 bytes per store for the bounded index command.
 
 
@@ -68,6 +71,12 @@ def configuration(path, project=None):
     storelib.safe(home, home.parent)
     key = hashlib.sha256(os.path.normcase(str(root)).encode('utf-8')).hexdigest()
     return cfg, root, home, {'global': home / 'memory/shared', 'project': home / 'memory/projects' / key}
+
+
+def foreground_writes_allowed(cfg):
+    """False in background mode unless this process is the background consolidation worker."""
+    ledger = cfg.get('ledger') or {}
+    return ledger.get('foreground_writes', True) is not False or os.environ.get('JASON_DREAM') == '1'
 
 
 def note_path(root, name):
@@ -486,7 +495,9 @@ def main():
     parser.add_argument('--max-bytes', type=int, default=None)
     args = parser.parse_args()
     try:
-        with opened(args.config, args.project) as (_, project, roots):
+        with opened(args.config, args.project) as (cfg, project, roots):
+            if args.command in ('apply', 'remember') and not foreground_writes_allowed(cfg):
+                raise ValueError(BACKGROUND_ERROR)
             if args.command == 'apply':
                 if args.scope not in roots or args.plan is None:
                     raise ValueError('Missing plan or unavailable scope')

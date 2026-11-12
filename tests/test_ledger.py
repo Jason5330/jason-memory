@@ -240,5 +240,135 @@ class LedgerTests(Base):
         self.assertFalse((self.root / '.raw/ledger.jsonl').exists())
 
 
+class BackgroundModeTests(Base):
+    """Issue #11 V3, V7, V8, V9: foreground never writes memory; background worker does."""
+
+    ledger_cfg = {'enabled': True, 'foreground_writes': False, 'dream_every': 3}
+
+    def cli(self, *args, env=None):
+        import os
+        import subprocess
+        environment = dict(os.environ, PYTHONUTF8='1')
+        environment.pop('JASON_DREAM', None)
+        environment.update(env or {})
+        return subprocess.run([sys.executable, str(ROOT / 'tools/memory_runtime.py'), '--config', str(self.config),
+                               *args], capture_output=True, text=True, encoding='utf-8', env=environment)
+
+    def test_foreground_runtime_write_is_refused_worker_write_allowed(self):
+        args = ['remember', '--subject', 'user', '--key', 'clock', '--value', '24 小時制', '--why', 'seq 1']
+        refused = self.cli(*args)
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn('background memory mode', refused.stderr)
+        self.assertEqual(runtime.notes(self.root), {})
+        allowed = self.cli(*args, env={'JASON_DREAM': '1'})
+        self.assertEqual(allowed.returncode, 0, allowed.stderr)
+        self.assertEqual(len(runtime.notes(self.root)), 1)
+
+    def test_snapshot_tells_foreground_not_to_write(self):
+        text = self.event('SessionStart')['hookSpecificOutput']['additionalContext']
+        self.assertIn('BACKGROUND MEMORY MODE', text)
+        self.assertNotIn('Append: remember', text)
+        self.assertIn('search --text', text)
+
+    def test_stop_needs_no_notice_but_blocks_false_save_claim(self):
+        self.event('SessionStart')
+        self.event('UserPromptSubmit', prompt='以後時間都用 24 小時制')
+        import os
+        os.environ['JASON_DREAM'] = '1'
+        try:
+            with runtime.opened(self.config):
+                runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger seq 1')
+            self.assertEqual(self.event('Stop', last_assistant_message='ignored'), {})  # worker hooks are inert
+        finally:
+            del os.environ['JASON_DREAM']
+        self.assertEqual(self.event('Stop', last_assistant_message='好的，之後都用 24 小時制。'), {})
+        blocked = self.event('Stop', last_assistant_message='已記住你的偏好。')
+        self.assertEqual(blocked['decision'], 'block')
+        self.assertIn('Background memory mode', blocked['reason'])
+
+    def test_worker_prompt_contains_records_and_sources(self):
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='報表標題都用淡紫色')
+        self.event('Stop', last_assistant_message='好的。')
+        seen = []
+        code = dream.consolidate(self.config, self.project, 1, 2, dict(ledger.settings(self.config), dream_agent=['x']),
+                                 lambda cmd, text: seen.append((cmd, text)) or 0)
+        self.assertEqual(code, 0)
+        self.assertIn('[seq 1', seen[0][1])
+        self.assertIn('報表標題都用淡紫色', seen[0][1])
+        self.assertIn('來源：ledger seq', seen[0][1])
+
+    def test_missing_agent_keeps_cursor_for_retry(self):
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='x')
+        self.assertEqual(dream.consolidate(self.config, self.project, 1, 1,
+                                           dict(ledger.settings(self.config), dream_agent='no-such-agent')), 127)
+
+    def test_rebuild_archives_derived_notes_and_replays_ledger(self):
+        import os
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='標題用淺藍色')
+        self.event('UserPromptSubmit', prompt='更正：標題改用淡紫色')
+        os.environ['JASON_DREAM'] = '1'
+        try:
+            with runtime.opened(self.config):
+                runtime.remember(self.root, 'user', 'header.color', '淺藍色', '來源：ledger seq 1')
+        finally:
+            del os.environ['JASON_DREAM']
+        before = (self.root / '.raw/ledger.jsonl').read_bytes()
+
+        def worker(cmd, text):
+            self.assertIn('更正：標題改用淡紫色', text)
+            with runtime.opened(self.config):
+                runtime.remember(self.root, 'user', 'header.color', '淡紫色', '來源：ledger seq 2')
+            return 0
+        result = dream.rebuild(self.config, self.project, ledger.settings(self.config), worker)
+        os.environ.pop('JASON_DREAM', None)
+        self.assertEqual(result['exit_code'], 0)
+        current = ''.join(runtime.notes(self.root).values())
+        self.assertIn('淡紫色', current)
+        self.assertNotIn('淺藍色', current)
+        self.assertIn('ledger seq 2', current)
+        self.assertEqual((self.root / '.raw/ledger.jsonl').read_bytes(), before)
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['cursor'], 2)
+
+    def test_exact_lookup_in_raw_ledger(self):
+        self.event('UserPromptSubmit', prompt='錯誤碼是 E-4096-XY，報價 12,345.67 元')
+        with runtime.opened(self.config):
+            hits = ledger.search(self.root, 'E-4096-XY')
+        self.assertEqual(hits[0]['data']['text'], '錯誤碼是 E-4096-XY，報價 12,345.67 元')
+
+    def test_independent_reader_verifies_ledger_format(self):
+        """Spec in docs/ledger-format.md, reimplemented with json + hashlib only."""
+        import hashlib
+        self.event('UserPromptSubmit', prompt='一')
+        self.event('Stop', last_assistant_message='二')
+        previous = '0' * 64
+        for number, line in enumerate((self.root / '.raw/ledger.jsonl').read_text(encoding='utf-8').splitlines(), 1):
+            record = json.loads(line)
+            body = {k: v for k, v in record.items() if k != 'hash'}
+            digest = hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+            self.assertEqual((record['seq'], record['prev'], record['hash']), (number, previous, digest))
+            previous = record['hash']
+
+    def test_agent_must_report_ok_status_or_run_counts_as_failed(self):
+        import os
+        import memory_dream as dream
+        env, cases = dict(os.environ), [("print('saved')", 75), ("print('x'); print('JASON_DREAM_STATUS: failed')", 75),
+                                       ("print('JASON_DREAM_STATUS: ok')", 0), ("raise SystemExit(4)", 4)]
+        for code, expected in cases:
+            with self.subTest(code=code):
+                self.assertEqual(dream._run_agent([sys.executable, '-c', code], '', env, self.project), expected)
+
+    def test_codex_notify_records_turn(self):
+        import codex_notify
+        codex_notify.handle({'type': 'agent-turn-complete', 'thread-id': 't1', 'cwd': str(self.project),
+                             'input-messages': ['只答 45'], 'last-assistant-message': '45'})
+        with runtime.opened(self.config):
+            kinds = [(r['kind'], r['data']['text']) for r in ledger.replay(self.root, 't1')]
+        self.assertEqual(kinds, [('prompt', '只答 45'), ('assistant', '45')])
+
+
 if __name__ == '__main__':
     unittest.main()

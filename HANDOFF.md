@@ -51,6 +51,14 @@
 
 後續整理本交接文件時，原電腦的全局目錄與 Codex 全局入口已再次存在，本專案記憶目錄仍不存在。重建來源未查明；本次文件整理未執行安裝，也未再次刪除。接手時應核對所在電腦的即時狀態，不用歷史報告推論現在必然已安裝或已卸載。
 
+## dream-20261112 版：背景記憶模式（預設）
+
+使用者決定前台不寫記憶、不當輪通知。`.jason-memory.json` 的 `ledger.foreground_writes: false` 時，
+runtime 拒絕前台 remember/apply（只有 `JASON_DREAM=1` 的背景 worker 可寫），hook 指示不寫不說已記住，
+Stop 不要求通知但擋不實保存宣告。`tools/memory_dream.py` 把未整理帳本交給 Agent CLI（auto：claude→codex）；
+`rebuild --yes` 從帳本重建；`tools/codex_notify.py` 讓 Codex 記入帳本。帳本格式見 docs/ledger-format.md。
+全局版仍是前台流程，尚未切換。
+
 ## ledger-20261112 版（依 Issue #1–#10 與參考影片）
 
 評估與處理紀錄見 [evals/results/2026-11-12.md](evals/results/2026-11-12.md)。重點：

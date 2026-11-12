@@ -1,5 +1,11 @@
 ## 記憶（Jason-memory）
 
+### 背景記憶模式
+
+若目標設定檔的 `ledger.foreground_writes` 為 `false`：本輪不執行 remember/apply、不說「已記住」，
+只照常完成任務；對話由 hook／Codex notify 記入原始帳本，背景程序整理。下方保存流程只適用於
+`foreground_writes` 為 `true`（或未設定）的專案。
+
 ### 日常快速流程（優先於下方詳細流程）
 
 Claude hook 已提供完整最新筆記時直接重用；hook 未通知變更且正文仍在上下文時

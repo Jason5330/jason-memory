@@ -28,7 +28,8 @@ import memory_runtime as runtime
 LEDGER = 'ledger.jsonl'
 TEXT_CAP = 64 * 1024  # Per-field cap for conversation text; longer content is truncated and marked.
 STALE_SECONDS = 3600
-DEFAULT_SETTINGS = {'enabled': False, 'dream_every': 20, 'dream_command': None}
+DEFAULT_SETTINGS = {'enabled': False, 'dream_every': 20, 'dream_command': None,
+                    'dream_agent': 'auto', 'foreground_writes': True}
 
 
 def settings(config):
@@ -43,6 +44,12 @@ def settings(config):
     command = merged['dream_command']
     if command is not None and (not isinstance(command, list) or not all(isinstance(c, str) for c in command)):
         raise ValueError('ledger.dream_command must be a list of strings')
+    if merged['foreground_writes'] is False and not merged['enabled']:
+        raise ValueError('Background memory mode (foreground_writes=false) requires ledger.enabled=true')
+    if merged['enabled'] and command is None:
+        # Default worker: build the consolidation prompt and hand it to an agent CLI.
+        merged['dream_command'] = [sys.executable, str(Path(__file__).resolve().with_name('memory_dream.py')),
+                                   '--config', str(Path(config).absolute()), 'consolidate']
     return merged
 
 
@@ -217,7 +224,7 @@ def dream_run(config, project, upto, opts):
     with runtime.opened(config, project) as (_, _, roots):
         root = roots['project']
         start = dream_state(root)['cursor']
-    env = dict(os.environ, JASON_MEMORY_CONFIG=str(config), JASON_MEMORY_PROJECT=str(project),
+    env = dict(os.environ, JASON_DREAM='1', JASON_MEMORY_CONFIG=str(config), JASON_MEMORY_PROJECT=str(project),
                JASON_DREAM_FROM=str(start + 1), JASON_DREAM_UPTO=str(upto), JASON_MEMORY_ROOT=str(root))
     # The command runs outside the writer lock so foreground recall and saves never wait for it.
     code = subprocess.call(opts['dream_command'], env=env, cwd=str(project),

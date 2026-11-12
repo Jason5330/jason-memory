@@ -257,7 +257,8 @@ class PurgeTests(unittest.TestCase):
                    CLAUDE_CONFIG_DIR=str(self.profile / '.claude'))
         result = subprocess.run(['cmd', '/d', '/c', 'call', str(self.project / 'UNINSTALL.bat')],
                                 input='\n', env=env, capture_output=True, text=True,
-                                encoding='utf-8', timeout=30)
+                                # `pause` prints in the console code page (e.g. cp950), not UTF-8.
+                                encoding='utf-8', errors='replace', timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.project / '.jason-memory').exists())
 
