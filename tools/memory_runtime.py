@@ -217,10 +217,50 @@ def recover(root, _prepared=None):
     journal.unlink()
 
 
+def recover_global_rebuild(home, prepared=None):
+    journal = storelib.safe(home / '.rebuild-transaction.json', home)
+    if not journal.exists():
+        return
+    # The batch contains at most one normal-sized transaction for each scope.
+    if journal.stat().st_size > 2 * MAX_BYTES + 256:
+        raise ValueError('Oversized global rebuild journal; manual review required')
+    batch = json.loads(journal.read_text(encoding='utf-8'))
+    if (not isinstance(batch, dict) or set(batch) != {'project', 'transactions'} or
+            not isinstance(batch['project'], str) or len(batch['project']) != 64 or
+            any(c not in '0123456789abcdef' for c in batch['project']) or
+            not isinstance(batch['transactions'], dict) or
+            not batch['transactions'].keys() <= {'global', 'project'}):
+        raise ValueError('Invalid global rebuild journal; manual review required')
+    roots = {'global': home / 'memory/shared', 'project': home / 'memory/projects' / batch['project']}
+    for scope, tx in batch['transactions'].items():
+        root = storelib.safe(roots[scope], home)
+        pending = storelib.safe(root / '.transaction.json', root)
+        if pending.exists() and read_json(pending) != tx:
+            raise ValueError('Conflicting transaction during global rebuild recovery')
+        storelib.atomic_write(pending, json.dumps(tx, ensure_ascii=False))
+        recover(root, _prepared=tx if batch == prepared else None)
+    journal.unlink()
+
+
+def commit_global_rebuild(home, roots, plans):
+    """Publish both prepared scopes as one recoverable operation under the shared writer lock."""
+    transactions = {}
+    for scope, plan in plans.items():
+        tx, _, _, changed, index_changed = prepare_apply(roots[scope], plan, scope)
+        if changed or index_changed:
+            transactions[scope] = tx
+    if transactions:
+        batch = {'project': roots['project'].name, 'transactions': transactions}
+        storelib.atomic_write(home / '.rebuild-transaction.json', json.dumps(batch, ensure_ascii=False))
+        recover_global_rebuild(home, prepared=batch)
+
+
 @contextlib.contextmanager
 def opened(config, project=None):
     cfg, project, lock_root, roots = configuration(config, project)
     with storelib.locked(lock_root):
+        if cfg['mode'] == 'global':
+            recover_global_rebuild(lock_root)
         for root in roots.values():
             storelib.safe(root, lock_root)
             root.mkdir(parents=True, exist_ok=True)
@@ -314,7 +354,7 @@ def verify(root, names):
             'contents': {name: path.read_text(encoding='utf-8-sig') for name, path in zip(names, paths)}, **evidence}
 
 
-def apply(root, plan, scope='project'):
+def prepare_apply(root, plan, scope):
     if not isinstance(plan, dict) or set(plan) != {'expected_revision', 'updates', 'retire'}:
         raise ValueError('Plan needs expected_revision, updates (path: content), retire (paths)')
     old = notes(root)
@@ -361,12 +401,17 @@ def apply(root, plan, scope='project'):
     # Metadata-free legacy notes remain supported, but cannot be certified semantically clean.
     tx = {'id': uuid.uuid4().hex, 'notes': final, 'before': before,
           'remove': plan['retire'], 'index': index}
-    payload = json.dumps(tx, ensure_ascii=False)
-    if len(payload.encode('utf-8')) > MAX_BYTES:
+    if len(json.dumps(tx, ensure_ascii=False).encode('utf-8')) > MAX_BYTES:
         raise ValueError('Transaction exceeds size limit')
     index_changed = old_index != index
+    return tx, checks, facts, changed, index_changed
+
+
+def apply(root, plan, scope='project'):
+    tx, checks, facts, changed, index_changed = prepare_apply(root, plan, scope)
+    final, index = tx['notes'], tx['index']
     if changed or index_changed:
-        storelib.atomic_write(root / '.transaction.json', payload)
+        storelib.atomic_write(root / '.transaction.json', json.dumps(tx, ensure_ascii=False))
         recover(root, _prepared=tx)
     if notes(root) != final or read_index(root) != index:
         raise ValueError('Committed memory does not match the plan; do not claim success')

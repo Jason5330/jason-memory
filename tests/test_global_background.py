@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +101,130 @@ class GlobalBackgroundModeTests(unittest.TestCase):
         self.install()
         self.install("--mode", "foreground")
         self.assertEqual(self.toml.read_bytes(), b'model = "x"\n')
+
+    def test_rebuild_restores_shared_facts_and_preserves_other_projects(self):
+        worker = self.base / 'worker.py'
+        worker.write_text('''
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+text = sys.stdin.buffer.read().decode('utf-8')
+prefix = next(line for line in text.splitlines() if line.startswith('指令前綴（Bash）：'))
+target = re.search(r"--config (?:'([^']+)'|(\\S+))", prefix)
+config = next(value for value in target.groups() if value)
+scope = 'global' if '全局版範圍' in text else 'project'
+for scope, key, value in ((scope, 'shared', 'QA_REBUILT_SHARED'), ('project', 'local', 'QA_REBUILT_LOCAL')):
+    subprocess.run([sys.executable, sys.argv[1], '--config', config, '--project', str(Path.cwd()),
+                    'remember', '--scope', scope, '--type', 'feedback', '--subject', 'qa', '--key', key,
+                    '--value', value, '--why', 'ledger seq 1'], check=True)
+print('JASON_DREAM_STATUS: ok')
+''', encoding='utf-8')
+        self.install()
+        framework = self.home / 'framework'
+        config = framework / 'memory-config.json'
+        runtime = framework / 'tools/memory_runtime.py'
+        ledger = framework / 'tools/memory_ledger.py'
+        dream = framework / 'tools/memory_dream.py'
+        cfg = json.loads(config.read_text(encoding='utf-8'))
+        cfg['ledger']['dream_agent'] = [sys.executable, str(worker), str(runtime)]
+        config.write_text(json.dumps(cfg), encoding='utf-8')
+        a, b = self.base / 'project A', self.base / 'project B'
+        a.mkdir()
+        b.mkdir()
+
+        def run(script, project, *args):
+            return self.run_py(script, '--config', config, '--project', project, *args)
+
+        def context(project):
+            return json.loads(run(runtime, project, 'context').stdout)['stores']
+
+        self.env['JASON_DREAM'] = '1'
+        try:
+            run(runtime, b, 'remember', '--scope', 'global', '--subject', 'qa', '--key', 'unrelated',
+                '--value', 'QA_SHARED_FROM_B', '--why', 'B source')
+            run(runtime, b, 'remember', '--scope', 'project', '--subject', 'qa', '--key', 'b-local',
+                '--value', 'QA_B_LOCAL', '--why', 'B source')
+        finally:
+            del self.env['JASON_DREAM']
+        run(ledger, a, 'append', '--kind', 'prompt', '--data',
+            json.dumps({'text': 'Across all projects use QA_REBUILT_SHARED. In A only use QA_REBUILT_LOCAL.'}))
+        original = run(ledger, a, 'replay').stdout
+        rebuilt = json.loads(run(dream, a, 'rebuild', '--yes').stdout.splitlines()[-1])
+        self.assertTrue(rebuilt['rebuilt'])
+        for stores in (context(a), context(b)):
+            self.assertIn('QA_REBUILT_SHARED', str(stores['global']['notes']))
+            self.assertIn('QA_SHARED_FROM_B', str(stores['global']['notes']))
+            self.assertNotIn('QA_REBUILT_SHARED', str(stores['project']['notes']))
+        self.assertIn('QA_REBUILT_LOCAL', str(context(a)['project']['notes']))
+        self.assertIn('QA_B_LOCAL', str(context(b)['project']['notes']))
+        self.assertNotIn('QA_REBUILT_LOCAL', str(context(b)['project']['notes']))
+        self.assertEqual(run(ledger, a, 'replay').stdout, original)
+
+    def test_global_rebuild_recovers_both_scopes_from_an_interrupted_publish(self):
+        sys.path.insert(0, str(ROOT / 'tools'))
+        self.addCleanup(sys.path.remove, str(ROOT / 'tools'))
+        import memory_runtime as runtime
+
+        self.install()
+        config = self.home / 'framework/memory-config.json'
+        a, b = self.base / 'project A', self.base / 'project B'
+        a.mkdir()
+        b.mkdir()
+        with runtime.opened(config, a) as (_, _, roots):
+            plans = {}
+            for scope, root in roots.items():
+                stage = self.base / ('seed-' + scope)
+                stage.mkdir()
+                (stage / 'MEMORY.md').write_text(runtime.read_index(root), encoding='utf-8')
+                runtime.remember(stage, 'qa', 'scope', 'QA_' + scope.upper(), 'Synthetic test', scope)
+                plans[scope] = {'expected_revision': runtime.revision(root),
+                                'updates': runtime.notes(stage), 'retire': []}
+
+            recover = runtime.recover
+
+            def interrupt(root, _prepared=None):
+                if root == roots['project']:
+                    raise OSError('simulated interruption')
+                return recover(root, _prepared=_prepared)
+
+            with patch.object(runtime, 'recover', side_effect=interrupt):
+                with self.assertRaisesRegex(OSError, 'simulated interruption'):
+                    runtime.commit_global_rebuild(self.home, roots, plans)
+
+        # A different project opening the shared store also completes the pending rebuild.
+        with runtime.opened(config, b) as (_, _, reopened):
+            self.assertIn('QA_GLOBAL', str(runtime.notes(reopened['global'])))
+            self.assertNotIn('QA_PROJECT', str(runtime.notes(reopened['project'])))
+            self.assertIn('QA_PROJECT', str(runtime.notes(roots['project'])))
+        self.assertFalse((self.home / '.rebuild-transaction.json').exists())
+
+    def test_global_rebuild_keeps_a_concurrent_shared_update(self):
+        sys.path.insert(0, str(ROOT / 'tools'))
+        self.addCleanup(sys.path.remove, str(ROOT / 'tools'))
+        import memory_dream as dream
+        import memory_ledger as ledger
+        import memory_runtime as runtime
+
+        self.install()
+        config = self.home / 'framework/memory-config.json'
+        a, b = self.base / 'project A', self.base / 'project B'
+        a.mkdir()
+        b.mkdir()
+        with runtime.opened(config, a) as (_, _, roots):
+            ledger.append(roots['project'], 'prompt', {'text': 'Synthetic test'})
+
+        def concurrent_write(command, prompt):
+            with runtime.opened(config, b) as (_, _, roots):
+                runtime.remember(roots['global'], 'qa', 'concurrent', 'QA_CONCURRENT', 'B source', 'global')
+            return 0
+
+        result = dream.rebuild(config, a, ledger.settings(config), concurrent_write)
+        self.assertEqual(result['exit_code'], 75)
+        self.assertIn('changed during rebuild', result['error'])
+        with runtime.opened(config, b) as (_, _, roots):
+            self.assertIn('QA_CONCURRENT', str(runtime.notes(roots['global'])))
 
 
 if __name__ == "__main__":
