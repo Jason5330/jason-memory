@@ -18,8 +18,8 @@ Claude hook 已提供完整最新筆記時直接重用；hook 未通知變更且
 保留其他事實，不用暫存計畫檔。成功後一句通知含實際筆記連結、範圍與結果。
 remember 加 --type：身份／職務用 user，專案限制用 project，偏好用 feedback。
 憑證值（token、密碼、API key）不入庫，只可記環境變數名稱或保管位置。
-Codex 與 Claude 同時使用時，規範只寫在 AGENTS.md；CLAUDE.md 只放 @AGENTS.md 匯入，
-不複製條款，避免更正後兩個入口一新一舊。
+本節只合併到專案根目錄的 AGENTS.md，Codex 與 Claude Code 共用；不建立 CLAUDE.md，
+避免兩個入口一新一舊。Claude 的啟動索引由 hooks 注入。
 
 ### 回覆前先召回（此節放在記憶入口最前面）
 
@@ -31,13 +31,8 @@ Codex 與 Claude 同時使用時，規範只寫在 AGENTS.md；CLAUDE.md 只放 
 正常召回不說「已讀取記憶」「已套用偏好」「本次無需記憶」；只在實際新增、
 修改或封存後通報，讀寫失敗才說明問題。首次任務讀取完整協議。
 
-<!-- 安裝者指示：僅在 Claude Code 的 CLAUDE.md 內，於此節前加入實際的
-@ 匯入行，不放在程式碼區塊或反引號內。先建立索引，保留既有內容。
-匯入路徑相對於 CLAUDE.md 本身，與下方以專案根目錄為基準的操作路徑不同。
-根目錄 CLAUDE.md 用 @.jason-memory/MEMORY.md；.claude/CLAUDE.md 用
-@../.jason-memory/MEMORY.md。自訂相對路徑以 ./ 或 ../ 開頭，空白以反斜線跳脫，
-不要只加引號。依實際位置計算；不要把本註解當成匯入。
-Codex／其他宿主不假設支援 Claude 的 @ 匯入，使用明確讀取規則。 -->
+<!-- 安裝者指示：先建立索引，保留既有內容。不使用 @ 匯入；
+Claude Code 以 tools/install_hooks.py 合併 hooks 取得啟動索引，其他宿主使用明確讀取規則。 -->
 
 記憶庫：`<MEMORY_ROOT>/`；框架：`<FRAMEWORK_ROOT>/`。
 相對路徑以安裝此規則的專案根目錄為準。

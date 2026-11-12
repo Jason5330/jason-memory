@@ -81,7 +81,7 @@ python global/install.py --home "D:/JasonMemory" --agent both
 | 選項 | 安裝位置／做法 |
 |---|---|
 | `--agent codex` | 預設 `~/.codex/AGENTS.md`；存在非空的 `AGENTS.override.md` 時使用該檔案 |
-| `--agent claude` | 預設 `~/.claude/CLAUDE.md`，並合併 `~/.claude/settings.json` 的 Jason hooks |
+| `--agent claude` | 只合併 `~/.claude/settings.json` 的 Jason hooks（規則與召回由 hooks 注入）；不寫 `CLAUDE.md`，舊版留下的管理區塊會自動移除 |
 | `--agent both` | 安裝上述兩者，指向同一份記憶 |
 | `--agent generic` | 只安裝框架並產生 `GENERIC_INSTRUCTIONS.md`，不修改 AI 工具設定 |
 
@@ -97,7 +97,7 @@ Codex 會尊重 `CODEX_HOME`，Claude Code 會尊重 `CLAUDE_CONFIG_DIR`。
 不要覆蓋原有規則。安裝器不猜測未知工具的設定位置；若工具不支援全局規則，
 需要依該工具的方式在各工作區接入，不能宣稱已全局啟用。
 
-**既有專案規則需要人工整合。** 舊專案的 `AGENTS.md`、`CLAUDE.md` 或其他常駐規則，
+**既有專案規則需要人工整合。** 舊專案的 `AGENTS.md` 或其他常駐規則（含舊版留下的 `CLAUDE.md`），
 可能仍指定舊記憶庫或有更高優先的限制。安裝器不會修改這些專案檔案，
 全局入口也不能越過它們。請先備份，再合併記憶入口、處理衝突；
 原有記憶不會自動遷移或刪除。

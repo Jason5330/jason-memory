@@ -585,7 +585,8 @@ semantic correctness or model obedience.
 
 Put the recall instruction in the host's always-loaded project rules; the
 [installation template](templates/standing-rules.md) supplies it. This repository
-has [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md) entrypoints. Do not assume native memory features
+has a single [AGENTS.md](AGENTS.md) entrypoint shared by Codex and Claude Code (Claude also gets the
+snapshot from hooks); there is no CLAUDE.md. Do not assume native memory features
 load Jason's independent project folder or perform the curation pass.
 
 All cooperating writers use the same runtime lock and revision checks. Manual

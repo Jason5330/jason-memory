@@ -45,14 +45,10 @@ class DownloadTest(unittest.TestCase):
                 self.assertTrue(all(private.encode() not in zipfile.read(n) for n in names))
                 zipfile.extractall(folder / 'unpacked')
             project = folder / 'unpacked/jason-memory'
-            # The downloaded Claude entrance must resolve to the packaged blank index.
-            entrance = project / 'CLAUDE.md'
-            imports = [line[1:] for line in entrance.read_text(encoding='utf-8').splitlines()
-                       if line.startswith('@')]
-            self.assertEqual(imports, ['.jason-memory/MEMORY.md', 'AGENTS.md'])
-            # One shared rule source for Codex and Claude (issue #9).
-            self.assertTrue((entrance.parent / 'AGENTS.md').is_file())
-            self.assertEqual((entrance.parent / imports[0]).read_bytes(),
+            # AGENTS.md is the only rule entrance for every host; no CLAUDE.md is shipped.
+            self.assertTrue((project / 'AGENTS.md').is_file())
+            self.assertFalse((project / 'CLAUDE.md').exists())
+            self.assertEqual((project / '.jason-memory/MEMORY.md').read_bytes(),
                              (project / 'templates/MEMORY.md').read_bytes())
             for tool, argument in [('jason_check.py', '.jason-memory/MEMORY.md'),
                                    ('jason_doctor.py', '.jason-memory')]:

@@ -204,7 +204,7 @@ class StoreTest(unittest.TestCase):
 
     def test_published_document_links_resolve(self):
         # Check published prose links, not paths in example memory snippets.
-        for name in ('README.md', 'SKILL.md', 'CLAUDE.md', 'AGENTS.md'):
+        for name in ('README.md', 'SKILL.md', 'AGENTS.md'):
             text = doctor._active_markdown((ROOT / name).read_text(encoding='utf-8'))
             for target in re.findall(r'\]\(([^\s)]+)\)', text):
                 path = target.split('#', 1)[0]
@@ -217,7 +217,7 @@ class StoreTest(unittest.TestCase):
         # Framework sources need not sit at the consumer project's root.
         template = (ROOT / 'templates/standing-rules.md').read_text(encoding='utf-8')
         installed = template.replace('<MEMORY_ROOT>', '.jason-memory').replace('<FRAMEWORK_ROOT>', ROOT.as_posix())
-        for name in ('AGENTS.md', 'CLAUDE.md'):
+        for name in ('AGENTS.md',):
             self.write(name, installed)
         self.write('.jason-memory/MEMORY.md', (ROOT / 'templates/MEMORY.md').read_text(encoding='utf-8'))
         for target in re.findall(r'`([^`]+)`', installed):

@@ -72,7 +72,10 @@ class GlobalInstallTests(unittest.TestCase):
 
     def test_install_both_with_stable_absolute_paths_and_generic_export(self):
         self.run_install()
-        for target in (self.profile / ".codex/AGENTS.md", self.profile / ".claude/CLAUDE.md"):
+        # Claude gets rules from the global hooks; no CLAUDE.md is written.
+        self.assertFalse((self.profile / ".claude/CLAUDE.md").exists())
+        self.assertIn("claude_memory_hook.py", (self.profile / ".claude/settings.json").read_text(encoding="utf-8"))
+        for target in (self.profile / ".codex/AGENTS.md",):
             data = target.read_text(encoding="utf-8")
             self.assertIn(str(self.home.resolve()).replace("\\", "\\\\"), data)
             self.assertIn("--project ACTIVE_PROJECT_ROOT context", data)
@@ -81,15 +84,12 @@ class GlobalInstallTests(unittest.TestCase):
         self.assertTrue((self.home / "framework/tools/jason_check.py").is_file())
         self.assertTrue((self.home / "GENERIC_INSTRUCTIONS.md").is_file())
 
-    def test_claude_import_resolves_spaces_unicode_and_existing_memory_survives(self):
+    def test_spaces_unicode_paths_and_existing_memory_survives(self):
         self.home = self.base / "共享 記憶"
         self.profile = self.base / "同事 profile"
         self.run_install()
-        target = self.profile / ".claude/CLAUDE.md"
         index = self.home / "memory/shared/MEMORY.md"
-        line = next(x for x in target.read_text(encoding="utf-8").splitlines() if x.startswith("@"))
-        imported = (target.parent / line[1:].replace("\\ ", " ")).resolve()
-        self.assertEqual(imported, index.resolve())
+        self.assertFalse((self.profile / ".claude/CLAUDE.md").exists())
         self.assertEqual(index.read_bytes(), (self.package / "templates/MEMORY.md").read_bytes())
         self.assertNotIn("@", (self.profile / ".codex/AGENTS.md").read_text(encoding="utf-8"))
         index.write_bytes(b"existing index must survive")
@@ -97,25 +97,18 @@ class GlobalInstallTests(unittest.TestCase):
         self.assertEqual(index.read_bytes(), b"existing index must survive")
         self.assertFalse((self.home / "memory/projects").exists())
 
-    def test_upgrade_moves_legacy_block_to_front_and_uninstall_restores_user_bytes(self):
+    def test_upgrade_removes_legacy_claude_block_and_keeps_user_bytes(self):
         target = self.profile / ".claude/CLAUDE.md"
         prefix = b"\xef\xbb\xbf# My rules\r\nKeep this first user rule.\r\n"
         suffix = b"\r\nKeep this last user rule."
         self.write_config(target, prefix + START + b"\nlegacy\n" + END + suffix)
         self.run_install("--agent", "claude")
-        installed = target.read_bytes()
-        self.assertTrue(installed.startswith(b"\xef\xbb\xbf" + START))
-        self.assertIn(END + b"\n# My rules", installed)
+        self.assertEqual(target.read_bytes(), prefix + suffix)
         self.run_install("--agent", "claude")
-        self.assertEqual(target.read_bytes(), installed)
+        self.assertEqual(target.read_bytes(), prefix + suffix)
+        self.write_config(target, prefix + START + b"\nlegacy\n" + END + suffix)
         self.run_install("--agent", "claude", "--uninstall")
         self.assertEqual(target.read_bytes(), prefix + suffix)
-
-    def test_unicode_leading_relative_import_has_dot_prefix(self):
-        self.home = self.profile / '.claude' / '共享 memory'
-        self.run_install('--agent', 'claude')
-        data = (self.profile / '.claude/CLAUDE.md').read_text(encoding='utf-8')
-        self.assertIn('@./共享\\ memory/memory/shared/MEMORY.md\n', data)
 
     def test_invalid_shared_index_prevents_host_edits(self):
         index = self.home / "memory/shared/MEMORY.md"
@@ -186,11 +179,11 @@ class GlobalInstallTests(unittest.TestCase):
                    CLAUDE_CONFIG_DIR=str(self.base / "env-claude"))
         self.run_install(explicit_profile=False, env=env)
         self.assertTrue((self.base / "env-codex/AGENTS.md").exists())
-        self.assertTrue((self.base / "env-claude/CLAUDE.md").exists())
+        self.assertTrue((self.base / "env-claude/settings.json").exists())
         self.run_install("--codex-home", str(self.base / "custom-codex"),
                          "--claude-home", str(self.base / "custom-claude"), env=env)
         self.assertTrue((self.base / "custom-codex/AGENTS.md").exists())
-        self.assertTrue((self.base / "custom-claude/CLAUDE.md").exists())
+        self.assertTrue((self.base / "custom-claude/settings.json").exists())
 
     def test_generic_never_mutates_host_configuration(self):
         self.run_install("--agent", "generic")

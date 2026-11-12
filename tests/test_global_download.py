@@ -116,7 +116,7 @@ class GlobalDownloadTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(note.read_text(encoding="utf-8"), "user note")
         self.assertNotIn("jason-memory-global:start", (profile / ".codex/AGENTS.md").read_text())
-        self.assertNotIn("jason-memory-global:start", (profile / ".claude/CLAUDE.md").read_text())
+        self.assertFalse((profile / ".claude/CLAUDE.md").exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows launcher test")
     def test_windows_launcher_dry_run_uses_unpacked_installer(self):

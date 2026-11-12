@@ -19,9 +19,9 @@
 適用範圍及筆記連結的通報；沒有通報時，可要求 AI 檢查是否已載入本資料夾
 的 `AGENTS.md` 和 `SKILL.md`，不能只憑檔案存在就假定有生效。
 
-Claude Code 使用根目錄 `CLAUDE.md` 的匯入行，自動載入同一份索引。
-第一則回覆前仍須讀取適用筆記；正常召回不輸出記憶流程說明。
-若自行將入口搬到 `.claude/CLAUDE.md`，匯入路徑要改成 `@../.jason-memory/MEMORY.md`。
+Claude Code 與 Codex 共用根目錄的 `AGENTS.md`，不需要 `CLAUDE.md`。
+Claude 執行過 `INSTALL.cmd` 後，hooks 會在啟動與每輪注入索引及常駐偏好。
+正常召回不輸出記憶流程說明。
 
 ## 若看到 master 或 Create PR
 

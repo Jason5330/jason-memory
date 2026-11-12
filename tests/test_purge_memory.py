@@ -138,7 +138,7 @@ class PurgeTests(unittest.TestCase):
         self.assertFalse((self.project / 'my-memory').exists())
 
     def test_modified_rules_are_reported_and_preserved(self):
-        target = self.project / 'CLAUDE.md'
+        target = self.project / 'AGENTS.md'
         original = target.read_bytes() + b'\n# User-added work rules\n'
         target.write_bytes(original)
         result = self.run_cli(self.project / 'tools/purge_memory.py', code=2)

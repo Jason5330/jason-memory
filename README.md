@@ -64,7 +64,7 @@ Claude 與 Codex 共用單一 `AGENTS.md`；修正跨會話誤擋、compact 遺�
 
 ```text
 你的專案/
-├── AGENTS.md / CLAUDE.md  # 依 host 選用的常駐記憶規則
+├── AGENTS.md         # 唯一的常駐記憶規則（Codex 與 Claude Code 共用）
 └── .jason-memory/         # 你的本機記憶庫
     ├── MEMORY.md          # 索引：一行連結＋一句摘要
     ├── verify-before-done.md
@@ -116,7 +116,7 @@ updated: 2026-09-09
 
 ## 安裝
 
-健檢工具需要 **Python 3.9+**，只使用標準函式庫。Codex 使用 `AGENTS.md`，Claude Code 使用 `CLAUDE.md`；其他 Agent 使用其支援的常駐規則檔。[Codex 官方規則載入說明](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+健檢工具需要 **Python 3.9+**，只使用標準函式庫。Codex 與 Claude Code 都使用專案根目錄的 `AGENTS.md`，不需要 `CLAUDE.md`；Claude 另由 hooks 在每輪注入記憶快照。其他 Agent 使用其支援的常駐規則檔。[Codex 官方規則載入說明](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
 
 ### 直接使用下載版（推薦）
 
@@ -133,23 +133,19 @@ updated: 2026-09-09
 
 1. 下載本框架。它可以放在專案的 `jason-memory/` 子目錄或另外的固定位置。
 2. 在專案內建立記憶目錄，預設 `.jason-memory/`；索引不存在時，把 [索引範本](templates/MEMORY.md) 複製為 `MEMORY.md`。重跑安裝時保留既有索引與所有筆記。
-3. 把 [常駐規則範本](templates/standing-rules.md) 的「記憶（Jason-memory）」一節合併到專案根目錄的 `AGENTS.md` 或 `CLAUDE.md`。已有該節時更新該節，保留其他規則；不要重複附加。替換兩個佔位符：
+3. 把 [常駐規則範本](templates/standing-rules.md) 的「記憶（Jason-memory）」一節合併到專案根目錄的 `AGENTS.md`。已有該節時更新該節，保留其他規則；不要重複附加。替換兩個佔位符：
    - `<MEMORY_ROOT>`：實際記憶路徑，例如 `.jason-memory`。
    - `<FRAMEWORK_ROOT>`：框架原始碼路徑，例如 `jason-memory` 或絕對路徑。
 4. 一般資料夾直接略過 Git 設定。只有目標已知使用 Git 時，才將記憶目錄加入 `.gitignore`；若已知被追蹤，說明此具體問題，不擅自更動既有資料。不為記憶啟用而探測、初始化 Git，也不建立監控或提交提醒。
 5. 確認套用後的規則沒有佔位符殘留，索引及規則指定的 `SKILL.md`、兩支健檢工具都存在，然後執行健檢。
 
-Claude Code 另需在記憶入口最前面加入一行實際匯入，不能放在反引號或程式碼區塊內。
-專案根目錄的 `CLAUDE.md` 用 `@.jason-memory/MEMORY.md`；若入口放在
-`.claude/CLAUDE.md`，用 `@../.jason-memory/MEMORY.md`。匯入相對於規則檔本身，
-不是終端機工作目錄。自訂路徑含空白時以反斜線跳脫空白（如 `@../shared\ memory/MEMORY.md`）；
-不要只用引號包住整條路徑；相對路徑以 `./` 或 `../` 開頭，避免中文開頭的路徑漏載。
-先建立缺少的索引，既有索引不覆寫。Codex 不使用此匯入語法。
-[Claude Code 匯入說明](https://code.claude.com/docs/en/memory#import-additional-files)。
+Claude Code 不需要 `CLAUDE.md` 或 `@` 匯入：執行 `INSTALL.cmd`（或 `tools/install_hooks.py`）
+合併 hooks 後，SessionStart／UserPromptSubmit 會注入索引與常駐偏好。舊專案若有本框架寫過的
+`CLAUDE.md` 匯入行，可以刪除；規則只保留在 `AGENTS.md`。
 
-**不需要修改 `.claude/settings.json` 或註冊任何事件。** 只複製框架但沒有建立記憶目錄、套用規則，記憶流程不會自動啟用。
+**除了上述 hooks，不需要修改 `.claude/settings.json` 或註冊其他事件。** 只複製框架但沒有建立記憶目錄、套用規則，記憶流程不會自動啟用。
 
-若直接在本框架專案工作，根目錄的 [AGENTS.md](AGENTS.md) 和 [CLAUDE.md](CLAUDE.md) 已指向本機 `.jason-memory/` 與本專案的工具；它們不是供其他路徑直接複製的安裝範本。更新規則後開啟新對話，確認 host 有載入常駐規則。
+若直接在本框架專案工作，根目錄的 [AGENTS.md](AGENTS.md) 已指向本機 `.jason-memory/` 與本專案的工具；它們不是供其他路徑直接複製的安裝範本。更新規則後開啟新對話，確認 host 有載入常駐規則。
 
 也可以把這段提示詞交給 Agent：
 
@@ -158,11 +154,11 @@ Claude Code 另需在記憶入口最前面加入一行實際匯入，不能放�
 框架原始碼位於 <框架絕對路徑>。
 建立 .jason-memory；只有 MEMORY.md 不存在時才使用 templates/MEMORY.md
 初始化，保留既有索引與筆記。
-依目前 host 選用 AGENTS.md（Codex）或 CLAUDE.md（Claude Code），將框架的
-templates/standing-rules.md 合併進去；已有記憶節則更新，保留其他規則。替換
+將框架的 templates/standing-rules.md 合併進專案根目錄的 AGENTS.md
+（Codex 與 Claude Code 共用，不建立 CLAUDE.md）；已有記憶節則更新，保留其他規則。替換
 <MEMORY_ROOT> 和 <FRAMEWORK_ROOT> 為實際路徑。
-把回覆前召回規則放在記憶入口最前面。Claude Code 另加入相對於 CLAUDE.md
-所在位置的實際 @ 匯入行，讓索引在啟動時載入；不要放在程式碼區塊或反引號內。
+把回覆前召回規則放在記憶入口最前面。Claude Code 用 tools/install_hooks.py
+合併 hooks，由 hooks 在啟動與每輪注入索引。
 一般資料夾不需要任何 Git 操作；只有目標已知使用 Git 時才設定記憶目錄的
 忽略規則。不要為記憶啟用探測或初始化 Git、連接遠端，Claude hooks 使用新版安裝工具合併，保留其他設定。
 啟用主動判斷：使用者清楚表達的持久需求、叮嚀、偏好、糾正、專案限制，
@@ -328,7 +324,6 @@ python tools/build_download.py --output dist/jason-memory.zip
 jason-memory/
 ├── README.md
 ├── AGENTS.md
-├── CLAUDE.md
 ├── SKILL.md
 ├── tools/
 │   ├── jason_check.py

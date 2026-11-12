@@ -3,7 +3,7 @@
 `evals.json` 是測試者的案例清單；只將 `prompt` 交給受測 Agent，不提供
 `expected_output` 或本文件。使用假的測試資料，不連結真實客戶或通知服務。
 
-每個案例與版本使用不同目錄。複製待測的 `AGENTS.md`、`CLAUDE.md`、
+每個案例與版本使用不同目錄。複製待測的 `AGENTS.md`、
 `SKILL.md`、`templates/`、`tools/` 與 `.jason-memory.json`（決定前台／背景模式，缺少時會退回前台保存流程），以索引範本初始化 `.jason-memory/MEMORY.md`。
 明確讓 Agent 讀取該專案的常駐規則。原版與新版分別使用凍結的檔案快照，
 不要在執行中替換規則。這驗證載入後的規則行為，不等於驗證 host 自動載入。
@@ -22,7 +22,7 @@
 確認紀錄已入帳本，再以 `JASON_DREAM_FROM=1 JASON_DREAM_UPTO=<最後 seq>` 執行 `consolidate`
 （或調低 `dream_every` 讓背景自動觸發），檢查產生的筆記、類型與來源 seq；新對話再驗證召回。
 當輪出現「已記住」等保存宣告視為失敗。若要驗證舊流程，把 `foreground_writes` 設為 `true`。
-案例 15 的規則只在 `AGENTS.md`（`CLAUDE.md` 僅匯入），檢查新舊值時只看 `AGENTS.md`。
+案例 15 的規則只在 `AGENTS.md`（已不提供 `CLAUDE.md`），檢查新舊值時只看 `AGENTS.md`。
 
 其他案例從空記憶開始。每案保存使用者可見回覆、筆記及索引、規則變更與
 產物，執行兩支健檢。人工覆核需求的範圍、通報及例外；對 Excel 直接讀取

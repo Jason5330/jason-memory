@@ -50,21 +50,7 @@ def managed_span(data, path):
     return start, end
 
 
-def claude_import(index, config_dir):
-    """Resolve from CLAUDE.md, with Claude's backslash-space import escaping."""
-    try:
-        path = Path(os.path.relpath(index, config_dir)).as_posix()
-        if not path.startswith(("./", "../")):
-            # Claude's import recognizer can skip a bare Unicode-leading path.
-            path = "./" + path
-    except ValueError:  # Different Windows drives.
-        path = index.as_posix()
-    if any(c in path for c in '\r\n\t`<>"'):
-        raise ValueError("Memory path cannot be represented as a Claude import: " + path)
-    return "@" + path.replace(" ", "\\ ") + "\n\n"
-
-
-def instructions(home, claude_dir=None):
+def instructions(home):
     # These are JSON strings, not shell commands: agents must quote for their shell.
     paths = json.dumps({"memory_home": str(home),
                         "protocol": str(home / "framework/SKILL.md"),
@@ -73,8 +59,6 @@ def instructions(home, claude_dir=None):
                        ensure_ascii=False, indent=2)
     return (
         "\n\n## Jason-memory: recall before any visible reply\n\n"
-        + (claude_import(home / "memory/shared/MEMORY.md", claude_dir)
-           if claude_dir is not None else "") +
         "Every message: recall silently before replying. Reuse a complete current Claude hook snapshot; "
         "when it reports no change, reuse loaded notes. Do not reread SKILL.md or run context after a complete snapshot.\n"
         "Without hooks, after a partial snapshot, or if recall is missing, run the runtime with "
@@ -138,19 +122,21 @@ def main(argv=None):
                 targets.extend((codex / "AGENTS.md", override))
             else:
                 targets.append(override if override.is_file() and override.stat().st_size else codex / "AGENTS.md")
+        # Claude gets its rules and recall from the global hooks (settings.json). CLAUDE.md is no
+        # longer written; a managed block left by an older version is removed on install/uninstall.
+        legacy_claude = claude / "CLAUDE.md"
         if args.agent in ("claude", "both"):
-            targets.append(claude / "CLAUDE.md")
+            targets.append(legacy_claude)
         block = START + instructions(home) + END
         edits = []
         for target in targets:
             original = target.read_bytes() if target.exists() else b""
             span = managed_span(original, target)
             unmanaged = original[:span[0]] + original[span[1]:] if span else original
-            if args.uninstall:
+            if args.uninstall or target == legacy_claude:
                 updated = unmanaged
             else:
-                claude_dir = target.parent if target == claude / "CLAUDE.md" else None
-                target_block = (START + b"\n" + RECALL_V2 + instructions(home, claude_dir)
+                target_block = (START + b"\n" + RECALL_V2 + instructions(home)
                                 + END + b"\n")
                 # Keep the managed entrance first without changing any user-owned bytes.
                 bom = b"\xef\xbb\xbf" if unmanaged.startswith(b"\xef\xbb\xbf") else b""
