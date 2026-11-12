@@ -567,6 +567,30 @@ class BackgroundModeTests(Base):
         with runtime.opened(self.config):
             self.assertIsNone(ledger.pending(self.root)['running'])
 
+    def test_rebuild_with_lost_reservation_does_not_swap(self):
+        """#15 follow-up 2: an expired, replaced rebuild never swaps or reports success."""
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='x')
+        before = runtime.notes(self.root)
+
+        def replaced(cmd, text):
+            import re
+            staging = Path(re.search(r"--config '?([^'\s]+\.jason-memory\.json)", text).group(1))
+            with runtime.opened(staging) as (_, _, roots):
+                runtime.remember(roots['project'], 'user', 'rebuilt', '新值', '來源：ledger seq 1')
+            with runtime.opened(self.config):
+                state = ledger.dream_state(self.root)
+                state['running']['owner'] = 'replacement'
+                ledger._save_state(self.root, state)
+            return 0
+        result = dream.rebuild(self.config, self.project, ledger.settings(self.config), replaced)
+        self.assertEqual(result['exit_code'], 75)
+        self.assertFalse(result['rebuilt'])
+        self.assertIn('reservation lost', result['error'])
+        self.assertEqual(runtime.notes(self.root), before)
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['running']['owner'], 'replacement')
+
     def test_exact_lookup_in_raw_ledger(self):
         self.event('UserPromptSubmit', prompt='錯誤碼是 E-4096-XY，報價 12,345.67 元')
         with runtime.opened(self.config):

@@ -196,6 +196,9 @@ def rebuild(config, project, opts, runner=None):
             os.environ['JASON_DREAM'] = previous
     try:
         with runtime.opened(config, project) as (_, _, roots):
+            if code == 0 and (ledger.dream_state(root).get('running') or {}).get('owner') != owner:
+                # Our reservation expired and another job took over: swapping now could clobber it.
+                code, error = 75, 'rebuild reservation lost to another job; current notes kept'
             if code == 0 and runtime.revision(root) != started_revision:
                 # Notes changed while rebuilding (e.g. foreground_writes=true): swapping would undo them.
                 code, error = 75, 'memory store changed during rebuild; retry'
