@@ -188,7 +188,8 @@ def clean_codex_notify(plan, target):
     data = target.read_bytes()
     if b'codex_notify.py' not in data:
         return
-    updated = NOTIFY_LINE.sub(b'', data)
+    bom = b'\xef\xbb\xbf' if data.startswith(b'\xef\xbb\xbf') else b''
+    updated = bom + NOTIFY_LINE.sub(b'', data[len(bom):])
     if b'codex_notify.py' in updated:
         plan.remaining.append(str(target) + ' (codex_notify.py referenced in an unrecognized form; edit manually)')
     if updated != data:

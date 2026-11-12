@@ -15,7 +15,7 @@ PACKAGE_FILES = (
     'tools/memory_facts.py', 'tools/memory_runtime.py', 'tools/memory_ledger.py', 'tools/memory_dream.py', 'tools/codex_notify.py', 'docs/ledger-format.md', 'tools/claude_memory_hook.py',
     'tools/hook_settings.py', 'tools/install_hooks.py', 'global/global_store.py',
     'docs/memory-runtime.md', 'tests/test_memory_runtime.py', 'tests/hooks-validation.md',
-    'START_HERE.md', 'README.md', 'global/README.md', 'tests/test_ledger.py', 'AGENTS.md', 'SKILL.md',
+    'START_HERE.md', 'README.md', 'global/README.md', 'tests/test_ledger.py', 'tests/test_install.py', 'AGENTS.md', 'SKILL.md',
     'LICENSE', '.gitignore', 'templates/MEMORY.md',
     'templates/standing-rules.md', 'templates/example-feedback.md',
     'templates/example-project.md', 'tools/jason_check.py',

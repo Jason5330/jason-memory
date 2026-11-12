@@ -15,7 +15,7 @@
 **dream-20261112 版：背景記憶模式（預設）。** 前台只管做事、不寫記憶、不通知「已記住」；
 對話自動記入只追加的原始帳本，累積 20 筆後由背景 Agent（自動偵測 Claude Code／Codex CLI）
 整理成附來源的筆記，下一輪起生效。可 `rebuild` 從帳本重建，精確原文用 `search` 回查帳本。
-Codex 需在 `~/.codex/config.toml` 設定 `notify`，見 [runtime 協議](docs/memory-runtime.md#原始帳本鏡像與背景整理)。
+執行一次 `INSTALL.cmd` 就同時設定 Claude Code（hooks）與 Codex（`notify`），不必分開安裝；細節見 [runtime 協議](docs/memory-runtime.md#原始帳本鏡像與背景整理)。
 想要舊的「當輪保存並通知」，把 `.jason-memory.json` 的 `foreground_writes` 改為 `true`。
 
 **ledger-20261112 版：** 依參考影片的四層做法調整。新會話只帶小索引與常駐偏好，
@@ -28,7 +28,7 @@ Claude 與 Codex 共用單一 `AGENTS.md`；修正跨會話誤擋、compact 遺�
 欄位或建立暫存計畫。修正全局 hook 誤擋框架 SKILL.md，移除普通工具後的整庫掃描，
 保留保存證據與跨筆記更正保護。詳見 [快速流程](docs/memory-runtime.md#日常快速流程)。
 
-**一般使用者：下載 ZIP → 解壓縮 → 用 AI 開啟資料夾。Claude 建議先執行 INSTALL.cmd 接通 hooks；不重建記憶，不需要 Git、clone、commit 或 PR。**
+**一般使用者：下載 ZIP → 解壓縮 → 用 AI 開啟資料夾。先執行一次 INSTALL.cmd，同時接通 Claude Code 與 Codex；不重建記憶，不需要 Git、clone、commit 或 PR。**
 
 [下載一般使用版 ZIP](https://github.com/Jason5330/jason-memory/releases/latest/download/jason-memory.zip) · [開始使用](START_HERE.md)
 
@@ -122,7 +122,7 @@ updated: 2026-09-09
 
 1. 下載上方的一般使用版 ZIP，解壓到獨立的一般資料夾，例如桌面。
 2. 在 AI 工具中開啟解壓後包含 `AGENTS.md` 的 `jason-memory` 資料夾，建立新對話。
-3. Claude 使用者建議先執行 `INSTALL.cmd` 固定 Python 路徑，再開新對話；既有專案請合併設定，勿覆蓋。直接提出工作需求。空白索引已備好；AI 依常駐規則主動判斷需求、寫入並通報。
+3. 執行一次 `INSTALL.cmd`（同時設定 Claude Code 的 hooks 與 Codex 的 `notify`），再開新對話；既有專案請合併設定，勿覆蓋。直接提出工作需求。空白索引已備好；AI 依常駐規則主動判斷需求、寫入並通報。
 
 也可以在 GitHub 選 **Code → Download ZIP** 下載原始碼；原始碼 ZIP 不含個人記憶，
 第一次使用由 AI 從範本建立索引。兩種方式都不需 Git，也不要執行 `git init`。

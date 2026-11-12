@@ -180,8 +180,10 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 | `dream_agent` | `auto`（先找 `claude` 再找 `codex`）、`claude`、`codex`，或自訂指令陣列；提示由 stdin 傳入 |
 | `dream_command` | 進階：完全取代預設 worker（`tools/memory_dream.py consolidate`） |
 
-- **前台**：Claude 由 hooks 自動追加使用者提示、Shell 工具呼叫與結果、助理最終回覆；Codex 在
-  `~/.codex/config.toml` 加 `notify = ["python", "<絕對路徑>/tools/codex_notify.py"]`，每輪結束追加。
+- **前台**：Claude 由 hooks 自動追加使用者提示、Shell 工具呼叫與結果、助理最終回覆；Codex 由
+  `notify` 程式（`tools/codex_notify.py`）在每輪結束追加。專案的 `INSTALL.cmd` 會一次完成兩邊：合併 Claude
+  hooks，並在 `~/.codex/config.toml`（或 `CODEX_HOME`）最上方加入 `notify`；已有其他 `notify` 程式時不覆蓋、
+  在結果中回報，找不到 Codex 設定資料夾時略過。`INSTALL.cmd --uninstall` 兩邊一起移除，`--agent claude|codex` 只裝其一。
   前台模型只收到「不要寫記憶、不要說已記住」的指示；說了「已記住」會被 Stop hook 要求更正。
 - **帳本** `.jason-memory/.raw/ledger.jsonl`：只用 O_APPEND 追加，雜湊鏈防竄改，格式見
   [帳本格式](ledger-format.md)。`memory_ledger.py verify` 重算雜湊鏈；憑證值寫入前遮蔽為 `[REDACTED]`。

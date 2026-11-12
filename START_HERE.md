@@ -3,12 +3,12 @@
 1. 將 ZIP 解壓到自己的工作資料夾，例如桌面上的 `我的AI工作區`。
 2. 在支援本機檔案及專案規則的 AI 工具中，開啟解壓後包含 `AGENTS.md` 的
    `jason-memory` 資料夾，建立新對話。Codex 用本機資料夾，不選 Git worktree。
-3. Claude Code 建議先執行一次 `INSTALL.cmd`，合併 hooks 並固定目前 Python 路徑；
-   不清空、不重建已有記憶。重新開對話並確認 `/hooks` 已載入。
+3. 執行一次 `INSTALL.cmd`，Claude Code 與 Codex 一起設定好：合併 Claude 的 hooks，
+   並在 Codex 的 `~/.codex/config.toml` 加入記錄對話用的 `notify`（已有別的 `notify` 時不覆蓋，
+   會在結果中提示）。不清空、不重建已有記憶。重新開對話，Claude 可用 `/hooks` 確認。
 4. 直接說明你的工作，例如：「幫我整理這些資料；本專案的回報都先列結論。」
    預設是背景記憶模式：AI 當輪不寫記憶、不通知；對話記入原始帳本，累積後由背景
    Agent（需已安裝並登入 Claude Code 或 Codex CLI）整理成筆記，之後的對話讀回。
-   Codex 使用者另在 `~/.codex/config.toml` 加 `notify`（見 docs/memory-runtime.md）。
 
 不需要安裝 Git、執行 clone、建立分支、提交、推送或建立 PR。
 需要能讀寫本機檔案並載入規則的 AI 工具；健檢使用 Python 3.9+，可用工具
