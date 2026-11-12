@@ -83,8 +83,12 @@ def records(root):
 
 def verify(root):
     """Recompute the hash chain. Any edited, removed or reordered record is reported."""
+    return verify_chain(records(root))
+
+
+def verify_chain(existing):
     previous, count = '0' * 64, 0
-    for record in records(root):
+    for record in existing:
         count += 1
         if record.get('seq') != count or record.get('prev') != previous or record.get('hash') != _hash(record):
             raise ValueError('Ledger chain broken at seq ' + str(count))
@@ -154,14 +158,13 @@ def mirror(root, source, session=''):
 
 def replay(root, session=None):
     """Events in original order, optionally for one session (raw facts for exact recall)."""
-    verify(root)
-    return [r for r in records(root) if session is None or r['session'] == str(session)]
+    return [r for r in verified_records(root) if session is None or r['session'] == str(session)]
 
 
 def search(root, text, limit=20):
     """Exact-text lookup in the raw layer when a precise quote, number or error is needed."""
     needle = text.casefold()
-    hits = [r for r in records(root) if needle in json.dumps(r['data'], ensure_ascii=False).casefold()]
+    hits = [r for r in verified_records(root) if needle in json.dumps(r['data'], ensure_ascii=False).casefold()]
     return hits[-limit:]
 
 
@@ -260,8 +263,8 @@ def release_job(root, owner, upto=None, error=None):
 def verified_records(root):
     """Records after a full chain check and a check that nothing at or below the consolidated
     cursor was truncated or rewritten (checkpoint stored when the cursor advanced)."""
-    verify(root)
     existing = records(root)
+    verify_chain(existing)
     state = dream_state(root)
     cursor = state['cursor']
     if cursor:

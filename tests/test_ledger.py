@@ -597,6 +597,26 @@ class BackgroundModeTests(Base):
             hits = ledger.search(self.root, 'E-4096-XY')
         self.assertEqual(hits[0]['data']['text'], '錯誤碼是 E-4096-XY，報價 12,345.67 元')
 
+    def test_exact_lookup_rejects_tampered_records(self):
+        self.event('UserPromptSubmit', prompt='報價 12,345.6700 元')
+        path = self.root / '.raw/ledger.jsonl'
+        path.write_bytes(path.read_bytes().replace(b'12,345.6700', b'99,345.6700'))
+        with runtime.opened(self.config):
+            with self.assertRaisesRegex(ValueError, 'Ledger chain broken'):
+                ledger.search(self.root, '99,345.6700')
+
+    def test_worker_prompt_preserves_tool_evidence_within_record_cap(self):
+        import memory_dream as dream
+        self.event('PostToolUse', tool_name='Bash', tool_input={'command': 'x' * 9000},
+                   tool_response={'stdout': 'QA-EVIDENCE-7B9A amount 12,345.6700', 'exit_code': 0})
+        prompts = []
+        code = dream.consolidate(self.config, self.project, 1, 1, ledger.settings(self.config),
+                                 lambda cmd, text: prompts.append(text) or 0)
+        self.assertEqual(code, 0)
+        self.assertIn('QA-EVIDENCE-7B9A amount 12,345.6700', prompts[0])
+        line = next(line for line in prompts[0].splitlines() if line.startswith('[seq 1 '))
+        self.assertLessEqual(len(line), dream.RECORD_CAP)
+
     def test_independent_reader_verifies_ledger_format(self):
         """Spec in docs/ledger-format.md, reimplemented with json + hashlib only."""
         import hashlib

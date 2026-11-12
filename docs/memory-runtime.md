@@ -188,19 +188,22 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 - **帳本** `.jason-memory/.raw/ledger.jsonl`：只用 O_APPEND 追加，雜湊鏈防竄改，格式見
   [帳本格式](ledger-format.md)。`memory_ledger.py verify` 重算雜湊鏈；憑證值寫入前遮蔽為 `[REDACTED]`。
 - **重播／精確查詢**：`replay [--session ID]` 按原順序取回事件；`search --text 原文`
-  找確切句子、數字或錯誤訊息。筆記求快，帳本求準。
+  找確切句子、數字或錯誤訊息。兩個指令都先驗證帳本與已整理游標的 checkpoint。
 - **文件鏡像**：`mirror --file 路徑` 把文件逐位元組存到 `.raw/blobs/<sha256>`，
   帳本記錄來源路徑、大小與指紋；同內容只存一份，不改動原件。
 - **背景整理（做夢）**：每次追加紀錄（提示、工具、回覆）後，未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作時，以分離程序啟動
-  `dream-run`，前台不等待。worker 把紀錄與現有索引交給 Agent CLI（環境變數 `JASON_DREAM=1`，
+  `dream-run`，前台不等待。worker 把紀錄（含有長度上限的工具輸入與結果）與現有索引交給 Agent CLI（環境變數 `JASON_DREAM=1`，
   只有它能寫入），由它用 `remember`／`apply` 保存並在 `--why` 或正文寫明「來源：ledger seq N」。
   Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
   成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error` 並於下次觸發重試；
   沒有新紀錄不重跑。`memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
 - **重建**：`python tools/memory_dream.py --config .jason-memory.json rebuild --yes` 先在
-  `.raw/rebuild-*` 暫存庫從整份帳本重新整理，成功後才替換現行筆記（舊筆記封存）；失敗時現行筆記
-  不變、回傳非零 exit code 並記 `last_error`。重建期間現行筆記若被改動（例如 `foreground_writes: true`），
+  `.raw/rebuild-*` 暫存庫從整份帳本重新整理，整理成功才發布現行筆記（舊筆記封存）。整理失敗會保留現行筆記、
+  回傳非零 exit code 並記 `last_error`。重建期間現行筆記若被改動（例如 `foreground_writes: true`），
   放棄替換以免撤銷新筆記（代碼 75），可再重試；重建的工作標記若已過期被其他工作取代，同樣放棄替換。帳本本身不變。換用更強的模型後可以這樣重整。
+  全局版須用 `--project` 指定要重播的專案。重建會替換該專案的筆記，並把此專案重播所得的全局事實合併到共用庫。
+  其他專案貢獻且未受更正的共用筆記會保留。若重建期間專案或共用筆記有更新，重建會回報衝突並保留新寫入。
+  發布中斷後，下次開啟全局庫時會完成待處理的共用和專案更新。
 - **單一整理工作**：一般整理與重建共用 `dream.json` 的 `running` 欄位（含擁有者識別碼與程序 pid），
   同一時間只有一個；程序已結束或超過一小時即不再阻擋。只有目前的擁有者能結束工作、推進游標或記錄錯誤，
   過期被取代的 worker 不會改動任何狀態；整理成功後若期間又累積到門檻，立即接著啟動下一輪；
