@@ -9,8 +9,11 @@
 記憶仍是可閱讀的 Markdown 筆記、四種類型及索引，不需要 Git、GitHub、
 伺服器或額外的雲端同步帳號。
 
-新版修正全局 hook 誤擋框架說明檔，簡單偏好以一次 `remember` 呼叫完成保存、
-健檢與收據。完整 hook 快照可直接重用；不再每次讀多份說明或額外重跑健檢。
+**預設為背景記憶模式（與專案版相同）。** 對話中 AI 只管做事，不寫記憶、不說「已記住」；
+每輪對話自動記入原始帳本，累積約 20 筆後由背景程序呼叫本機已登入的 Claude Code 或 Codex CLI
+整理成筆記，之後的對話（任何資料夾）都會套用。沒有限定專案的一般偏好（回報格式、語言、
+時間格式等）整理到全局共用；只屬於某個專案的需求整理到該專案。想用舊的「當輪保存並通知」，
+安裝時加 `--mode foreground`。
 
 這是另一個獨立版本，不會取代原本的專案版 ZIP，也不會自動搬動既有記憶。
 
@@ -20,10 +23,11 @@
 網頁聊天室若沒有本機檔案權限，不能只靠這個 ZIP 共用記憶。
 
 1. 解壓 `jason-memory-global.zip`，打開內層 `jason-memory-global` 資料夾。
-2. Windows 執行 `INSTALL.cmd`，預設安裝 Codex 與 Claude Code 的記憶入口。
+2. Windows 執行 `INSTALL.cmd`，一次設定 Claude Code（全局 hooks）與 Codex（`~/.codex/AGENTS.md`
+   規則及 `config.toml` 的 `notify`）。已有其他 `notify` 程式時不覆蓋。
 3. 在各 AI 工具開啟真正要工作的專案，重新啟動工作階段／建立新對話，讓使用者層級規則載入。
-4. 正常說明需求；例如「所有專案回報都先列結論」可保存為全局偏好。
-   AI 保存成功後應同輪通報內容、原因、適用範圍及筆記連結。
+4. 在任何資料夾正常說明需求，例如「以後回報都先列結論」。當輪不會出現保存通知；
+   背景整理完成後（約每 20 筆紀錄一次）就成為全局偏好，所有資料夾都會套用。
 
 **全局版需要這一次安裝。** 它與解壓即用的專案版不同：
 安裝器將執行檔複製到固定位置，再把入口加入所選 AI 的使用者規則。
@@ -37,6 +41,14 @@ python global/install.py --dry-run
 python global/install.py --agent both
 python global/install.py --agent codex
 python global/install.py --agent claude
+python global/install.py --mode foreground   # 舊流程：當輪保存並通知
+```
+
+背景整理的進度與手動觸發（`ACTIVE_PROJECT` 換成目前工作資料夾）：
+
+```text
+python ~/.jason-memory-global/framework/tools/memory_ledger.py --config ~/.jason-memory-global/framework/memory-config.json --project ACTIVE_PROJECT pending
+python ~/.jason-memory-global/framework/tools/memory_ledger.py --config ~/.jason-memory-global/framework/memory-config.json --project ACTIVE_PROJECT dream-run --upto HEAD
 ```
 
 依環境將 `python` 換成 `python3` 或 `py -3`。`--dry-run` 只列出計畫，完全不建立或修改檔案。

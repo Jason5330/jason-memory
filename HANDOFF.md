@@ -51,6 +51,14 @@
 
 後續整理本交接文件時，原電腦的全局目錄與 Codex 全局入口已再次存在，本專案記憶目錄仍不存在。重建來源未查明；本次文件整理未執行安裝，也未再次刪除。接手時應核對所在電腦的即時狀態，不用歷史報告推論現在必然已安裝或已卸載。
 
+## globaldream-20261112 版：全局版也改為背景記憶模式
+
+`global/install.py` 預設 `--mode background`：`memory-config.json` 加入 ledger 設定、Codex `AGENTS.md`
+寫入背景模式規則、`config.toml` 加 `notify`（共用 `hook_settings.merged_notify`）。`codex_notify.py`
+在資料夾沒有 `.jason-memory.json` 時改用全局設定、以目前資料夾為專案。背景整理在全局模式提示
+一般偏好用 `--scope global`。清除工具的全局身分檢查改為只核對 version/mode/home。
+`--mode foreground` 保留舊流程。
+
 ## agents-20261112 版：只用 AGENTS.md
 
 依使用者指示移除 `CLAUDE.md`：專案版不再提供，Codex 與 Claude Code 共用 `AGENTS.md`，Claude 的啟動索引

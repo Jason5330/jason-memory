@@ -3,6 +3,12 @@ name: jason-global
 description: Use when working with Jason-memory Global Edition across local AI tools, recalling user preferences, assessing each new user message, or saving verified reusable lessons with global or project scope.
 ---
 
+## 背景記憶模式（預設）
+
+`memory-config.json` 含 `ledger.foreground_writes: false` 時：對話中不執行 remember/apply、不說「已記住」，
+runtime 會拒絕前台寫入；對話由 Claude hooks 與 Codex `notify` 記入各專案的原始帳本，背景程序
+（環境變數 `JASON_DREAM=1`）整理成筆記。下方保存流程只在 `--mode foreground` 安裝時適用。
+
 ## 日常快速流程（優先於下方詳細協議）
 
 入口／Claude hook 已提供完整最新筆記時直接重用；未變更不再跑 context、讀本說明

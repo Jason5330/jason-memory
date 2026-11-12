@@ -294,8 +294,11 @@ def make_plan(args):
             raise ValueError('Unsafe global deletion root: ' + str(home))
         if home.exists():
             marker = safe(home / 'framework/memory-config.json')
-            if not marker.is_file() or json.loads(marker.read_text(encoding='utf-8-sig')) != {
-                    'version': 1, 'mode': 'global', 'home': '..'}:
+            marker_data = json.loads(marker.read_text(encoding='utf-8-sig')) if marker.is_file() else {}
+            # Identity keys only; newer installs add optional settings such as `ledger`.
+            if (not isinstance(marker_data, dict) or set(marker_data) - {'version', 'mode', 'home', 'ledger'}
+                    or {k: marker_data.get(k) for k in ('version', 'mode', 'home')}
+                    != {'version': 1, 'mode': 'global', 'home': '..'}):
                 raise ValueError('Cannot verify Jason-memory global ownership: ' + str(home))
             clean_global(plan, home)
 

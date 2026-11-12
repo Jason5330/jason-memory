@@ -84,8 +84,14 @@ def chunks(records):
         yield current
 
 
-def build_prompt(lines, index_text, prefix):
-    return (INSTRUCTIONS + '\n指令前綴（Bash）：' + prefix +
+GLOBAL_SCOPE_HINT = ('\n全局版範圍：使用者對 AI 的一般偏好與身份（回報格式、語言、時間格式、稱呼等，'
+                     '沒有限定某個專案或檔案）用 --scope global，所有資料夾都會套用；只針對目前這個專案的'
+                     '需求、限制與現況用 --scope project。--type project 只能搭配 --scope project。'
+                     'read 時也要指定 --scope。\n')
+
+
+def build_prompt(lines, index_text, prefix, global_mode=False):
+    return (INSTRUCTIONS + (GLOBAL_SCOPE_HINT if global_mode else '') + '\n指令前綴（Bash）：' + prefix +
             '\n例：' + prefix + ' remember --scope project --type feedback --subject user --key KEY '
             '--value "完整要求" --why "使用者要求；來源：ledger seq N"\n'
             + prefix + ' read --note 相對路徑.md\n\n## 現有索引\n\n' + index_text +
@@ -139,7 +145,7 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
     run = runner or (lambda cmd, text: _run_agent(cmd, text, env, project))
     for lines in chunks(records):
         try:
-            code = run(command, build_prompt(lines, index_text, prefix))
+            code = run(command, build_prompt(lines, index_text, prefix, tcfg.get('mode') == 'global'))
         except (OSError, subprocess.SubprocessError) as exc:
             print('Jason-memory dream: agent failed to run: ' + type(exc).__name__, file=sys.stderr)
             return 127 if isinstance(exc, OSError) else 124

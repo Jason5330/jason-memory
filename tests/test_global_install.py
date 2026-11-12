@@ -78,7 +78,8 @@ class GlobalInstallTests(unittest.TestCase):
         for target in (self.profile / ".codex/AGENTS.md",):
             data = target.read_text(encoding="utf-8")
             self.assertIn(str(self.home.resolve()).replace("\\", "\\\\"), data)
-            self.assertIn("--project ACTIVE_PROJECT_ROOT context", data)
+            self.assertIn("--project ACTIVE_PROJECT_ROOT index", data)
+            self.assertIn("background memory mode", data)
             self.assertEqual(data.count(START.decode()), 1)
         self.assertTrue((self.home / "framework/global_store.py").is_file())
         self.assertTrue((self.home / "framework/tools/jason_check.py").is_file())

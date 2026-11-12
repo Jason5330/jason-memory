@@ -5,17 +5,11 @@ import argparse
 import json
 import os
 from pathlib import Path
-import re
 import shlex
 import sys
 import uuid
 import hook_settings
 import memory_runtime
-
-# Same single-line form that tools/purge_memory.py removes.
-NOTIFY_LINE = re.compile(rb'^[ \t]*notify[ \t]*=[ \t]*\[[^\r\n]*codex_notify\.py[^\r\n]*\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)', re.M)
-ANY_NOTIFY = re.compile(rb'^[ \t]*notify[ \t]*=', re.M)
-
 
 def codex_config(args):
     if args.codex_home:
@@ -25,21 +19,6 @@ def codex_config(args):
     else:
         home = Path(args.user_home or Path.home()) / '.codex'
     return home.absolute() / 'config.toml'
-
-
-def merged_notify(original, script, uninstall):
-    """Return (updated bytes, status). Adds a top-level `notify` before any TOML table."""
-    bom = b'\xef\xbb\xbf' if original.startswith(b'\xef\xbb\xbf') else b''
-    body = NOTIFY_LINE.sub(b'', original[len(bom):])
-    stripped = bom + body
-    if uninstall:
-        return stripped, 'removed' if stripped != original else 'absent'
-    if ANY_NOTIFY.search(body):
-        return original, 'skipped: another Codex notify program is configured; add codex_notify.py manually'
-    line = ('notify = ' + json.dumps([Path(sys.executable).as_posix(), script.as_posix()],
-                                     ensure_ascii=False) + '\n').encode('utf-8')
-    updated = bom + line + body
-    return updated, 'installed' if updated != original else 'unchanged'
 
 
 def write_with_backup(target, original, updated):
@@ -90,8 +69,8 @@ def main(argv=None):
                 if toml.is_symlink():
                     raise ValueError('Redirected Codex config is not supported: ' + str(toml))
                 original = toml.read_bytes() if toml.exists() else b''
-                updated, status = merged_notify(original, Path(__file__).resolve().with_name('codex_notify.py'),
-                                                args.uninstall)
+                updated, status = hook_settings.merged_notify(
+                    original, sys.executable, Path(__file__).resolve().with_name('codex_notify.py'), args.uninstall)
                 if not args.dry_run and updated != original:
                     write_with_backup(toml, original, updated)
             result.update(codex_config=str(toml), codex_notify=status)

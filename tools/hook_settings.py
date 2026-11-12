@@ -39,3 +39,28 @@ def merged(original, command=None):
     if not hooks:
         data.pop('hooks', None)
     return (json.dumps(data, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
+
+
+# --- Codex notify (shared by the project and global installers) -------------
+import re as _re
+from pathlib import Path as _Path
+
+# Same single-line form that tools/purge_memory.py removes.
+NOTIFY_LINE = _re.compile(rb'^[ \t]*notify[ \t]*=[ \t]*\[[^\r\n]*codex_notify\.py[^\r\n]*\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)', _re.M)
+ANY_NOTIFY = _re.compile(rb'^[ \t]*notify[ \t]*=', _re.M)
+
+
+def merged_notify(original, python, script, uninstall=False):
+    """Return (updated bytes, status). Adds a top-level `notify` before any TOML table and never
+    replaces another notify program."""
+    bom = b'\xef\xbb\xbf' if original.startswith(b'\xef\xbb\xbf') else b''
+    body = NOTIFY_LINE.sub(b'', original[len(bom):])
+    stripped = bom + body
+    if uninstall:
+        return stripped, 'removed' if stripped != original else 'absent'
+    if ANY_NOTIFY.search(body):
+        return original, 'skipped: another Codex notify program is configured; add codex_notify.py manually'
+    line = ('notify = ' + json.dumps([_Path(python).as_posix(), _Path(script).as_posix()],
+                                     ensure_ascii=False) + '\n').encode('utf-8')
+    updated = bom + line + body
+    return updated, 'installed' if updated != original else 'unchanged'

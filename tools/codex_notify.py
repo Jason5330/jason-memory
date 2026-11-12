@@ -24,19 +24,36 @@ def find_config(start):
     return None
 
 
+def global_config():
+    """Installed global edition: <home>/framework/memory-config.json next to this tools folder."""
+    candidate = Path(__file__).resolve().parents[1] / 'memory-config.json'
+    if candidate.is_file():
+        try:
+            if runtime.read_json(candidate).get('mode') == 'global':
+                return candidate
+        except (OSError, ValueError):
+            return None
+    return None
+
+
 def handle(payload, cwd=None):
     if not isinstance(payload, dict) or payload.get('type') != 'agent-turn-complete':
         return None
     if os.environ.get('JASON_DREAM') == '1':
         return None  # The background worker's own turns are not user conversation.
-    config = find_config(payload.get('cwd') or cwd or os.getcwd())
+    workspace = Path(payload.get('cwd') or cwd or os.getcwd()).resolve()
+    config = find_config(workspace)  # An explicit project configuration wins.
+    project = None
+    if config is None:
+        config = global_config()
+        project = workspace
     if config is None:
         return None
     opts = ledger.settings(config)
     if not opts['enabled']:
         return None
     session = str(payload.get('thread-id') or payload.get('turn-id') or '')
-    with runtime.opened(config) as (_, project, roots):
+    with runtime.opened(config, project) as (_, project, roots):
         root = roots['project']
         for message in payload.get('input-messages') or []:
             ledger.append(root, 'prompt', {'text': str(message), 'host': 'codex'}, session)
