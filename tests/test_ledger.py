@@ -820,13 +820,16 @@ class IntegrityTests(Base):
         values = {'password': 987612, 'token': 981234, 'tokens': [123, {'code': False}],
                   'clientSecret': True, 'X-API-Key': 'QA-only', 'service_token': 17,
                   'accessTokens': [7], '私鑰': 5, 'token_count': '1240', 'tokenizer': 'sample_bpe',
-                  'max_output_tokens': '40', 'credentials_required': True, 'note': 'keep-me'}
+                  'max_output_tokens': '40', 'credentials_required': True, 'note': 'keep-me',
+                  'oauthTokens': ['qa-only'], 'headers.authorization': 'qa-only', 'accessTokenValue': 123,
+                  'usage.input_tokens': 82, 'tokenCount': 16}
         expected = {'password': '[REDACTED]', 'token': '[REDACTED]',
                     'tokens': ['[REDACTED]', {'code': '[REDACTED]'}],
                     'clientSecret': '[REDACTED]', 'X-API-Key': '[REDACTED]', 'service_token': '[REDACTED]',
                     'accessTokens': ['[REDACTED]'], '私鑰': '[REDACTED]', 'token_count': '1240',
                     'tokenizer': 'sample_bpe', 'max_output_tokens': '40', 'credentials_required': True,
-                    'note': 'keep-me'}
+                    'note': 'keep-me', 'oauthTokens': ['[REDACTED]'], 'headers.authorization': '[REDACTED]',
+                    'accessTokenValue': '[REDACTED]', 'usage.input_tokens': 82, 'tokenCount': 16}
         with runtime.opened(self.config):
             ledger.append(self.root, 'tool', {'result': values})
             self.assertEqual(ledger.replay(self.root)[-1]['data']['result'], expected)

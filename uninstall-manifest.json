@@ -39,7 +39,7 @@
     "tests/test_global_install.py": "695d5871d34ad1f44012f5d9f832c7bd366197ccabe4d596dbe47565e25ba641",
     "tests/test_global_store.py": "b1446b7a73ef76341e0961e6bdbdca3cdecebb83584ce40b4acce5d3b945e608",
     "tests/test_install.py": "5b468fd134d0e22dcb56a06b1abcebc54c6cc3abd2b392ce490f2a389a6c003a",
-    "tests/test_ledger.py": "90f936ab5f1d4466709a103d8872924f4411e6130c2e3b60214845d83b84392c",
+    "tests/test_ledger.py": "cd05c0ced3adf3779d49d0cd2a73156872d623aed4cffbef82b5ace4a23e57d5",
     "tests/test_memory_runtime.py": "2a471166e0952ba4edfdf696b8c7921c4f9c39c9b5cb658e258b0066b252cf37",
     "tests/test_memory_tools.py": "4766a5823389a95b1b929d084228234f19bde8135b213945e05dd03997b8762b",
     "tests/test_purge_memory.py": "4db419202f1b6a8839f46886854c5ef42f0c0ec781d551d44ffedb59ddc4a4bc",
@@ -53,7 +53,7 @@
     "tools/jason_doctor.py": "3969505d9da9e7bf183d0e60e0be886fea40ecfa1eff157b4eb41a889c5134e4",
     "tools/memory_dream.py": "357f2f97899309fdfbfbcb9b275e7cb0b4f012fd5cffbe5364e34a603d2c20ac",
     "tools/memory_facts.py": "f01a8e94dccef7aaff610cf7c6a72ff59875ce20096aadaca08c0f1a1a42e2a6",
-    "tools/memory_ledger.py": "8b50a611b9754242ce909d91e838e680ecab0b81597c558e1faab94dc3cf6cc3",
+    "tools/memory_ledger.py": "e60e61c635caa92e73fe0b1c581c41114da21dee6743b780f74509f986c619d4",
     "tools/memory_runtime.py": "9f45034e9c1d74e675573b15a2257b193790dd9a44a6f7356bb6fc48bc90f874",
     "tools/purge_memory.py": "79e14fe47b411ab8fa4886175a73e4cc7de4bfcc234789eae0003b15faf25627"
   }

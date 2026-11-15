@@ -125,15 +125,15 @@ def verify_chain(existing):
 # Match credential names and qualified suffixes, so token_count, tokenizer and usage keys stay readable.
 SENSITIVE_KEY = re.compile(
     r'(?:^|_)(?:passwords?|passwd|passphrase|pass|pwd|secrets?|token|api_?key|access_?key|'
-    r'private_?key|credentials?|authorization|auth|cookies?|session_?key)$'
-    r'|^(?:(?:access|refresh|id|session|bearer|auth|api)_)?tokens$'
+    r'private_?key|credentials?|authorization|auth|cookies?|session_?key)(?:_value)?$'
+    r'|^tokens$|(?:^|_)(?:access|refresh|id|session|bearer|auth|api|oauth|security)_tokens$'
     r'|(?:密碼|密码|口令|金鑰|金钥|密鑰|密钥|私鑰|私钥|憑證|凭证|權杖|令牌)$'
 )
 
 
 def sensitive_key(key):
     key = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', str(key))
-    key = re.sub(r'[\s_-]+', '_', key).strip('_').casefold()
+    key = re.sub(r'[\s_.-]+', '_', key).strip('_').casefold()
     return bool(SENSITIVE_KEY.search(key))
 
 
