@@ -66,14 +66,14 @@ python ~/.jason-memory-global/framework/tools/memory_ledger.py --config ~/.jason
     projects/<識別碼>/       依專案根目錄隔離的筆記及索引
 ```
 
-安裝時即建立缺少的 `memory/shared/MEMORY.md`；既有索引及筆記不會被重設。
-Claude Code 的管理入口會直接匯入這份共用索引；路徑由安裝器依實際位置計算，
-支援同事的使用者目錄、中文及空白，不寫死任何人的名稱。
-個別專案索引仍在首次 `context` 時建立；不把所有專案索引匯入全局入口。
-每輪第一則可見回覆前，AI 使用 hook 最新完整快照；無 hook 或截斷才執行 `context` 刷新全局與目前專案索引，再讀取
-適用的開場、格式及任務筆記；匯入的啟動快照不取代跨 AI 更新檢查。
-簡單問答也適用。正常召回不說「我來讀取記憶」「已讀取記憶」「本次無需記憶」；
-實際保存、修改、封存才通報，讀寫失敗才說明問題。
+安裝時即建立缺少的 `memory/shared/MEMORY.md`；既有索引及筆記不會被重設。路徑由安裝器依實際位置計算，
+支援同事的使用者目錄、中文及空白，不寫死任何人的名稱。各資料夾的專案記憶在第一次使用時建立，
+原始帳本放在該資料夾的 `memory/projects/<識別碼>/.raw/`。
+
+每輪第一則可見回覆前先召回：Claude 由全局 hooks 注入全局與目前資料夾的索引及常駐偏好；
+Codex 依 `~/.codex/AGENTS.md` 的規則先讀小索引（`index`），相關時才單篇讀取（`read`）。
+簡單問答也適用。正常召回不說「我來讀取記憶」「已讀取記憶」「本次無需記憶」。
+背景模式下 AI 不會當輪通報保存；記憶在背景整理後的下一輪生效。
 同一專案在不同 AI 必須使用相同的實體專案根目錄；不同專案使用不同索引。
 專案根目錄搬動或更名後會得到新的識別碼，需另行搬移對應專案記憶；全局偏好不受影響。
 全局需求的專案例外只寫入該專案，當次要求不自動變成永久規則。
@@ -92,7 +92,7 @@ python global/install.py --home "D:/JasonMemory" --agent both
 
 | 選項 | 安裝位置／做法 |
 |---|---|
-| `--agent codex` | 預設 `~/.codex/AGENTS.md`；存在非空的 `AGENTS.override.md` 時使用該檔案 |
+| `--agent codex` | 規則寫入 `~/.codex/AGENTS.md`（存在非空的 `AGENTS.override.md` 時用該檔）；背景模式另在 `config.toml` 加 `notify` 記錄對話 |
 | `--agent claude` | 只合併 `~/.claude/settings.json` 的 Jason hooks（規則與召回由 hooks 注入）；不寫 `CLAUDE.md`，舊版留下的管理區塊會自動移除 |
 | `--agent both` | 安裝上述兩者，指向同一份記憶 |
 | `--agent generic` | 只安裝框架並產生 `GENERIC_INSTRUCTIONS.md`，不修改 AI 工具設定 |
@@ -116,13 +116,24 @@ Codex 會尊重 `CODEX_HOME`，Claude Code 會尊重 `CLAUDE_CONFIG_DIR`。
 
 ## 驗證是否接通
 
-在 AI A 的專案 A 說「所有專案都先用一句話回報結論」，確認它通報已保存至全局。
-再用 AI B 開啟不同的專案 B／新對話，請它讀取共用記憶並說明適用的回報偏好。
-接著在專案 A 指定一個**只限該專案**的例外，確認 B 不會收到這個例外。
-測試時不要使用私人機密資料。
+1. 用 AI A 開啟資料夾 A，說「以後所有專案都先用一句話回報結論」。當輪不會出現保存通知。
+2. 讓背景整理跑一次：繼續對話到累積約 20 筆，或手動執行（`HEAD` 用 `pending` 的 `head` 值）：
+
+   ```text
+   python ~/.jason-memory-global/framework/tools/memory_ledger.py --config ~/.jason-memory-global/framework/memory-config.json --project 資料夾A pending
+   python ~/.jason-memory-global/framework/tools/memory_ledger.py --config ~/.jason-memory-global/framework/memory-config.json --project 資料夾A dream-run --upto HEAD
+   ```
+
+3. 確認 `~/.jason-memory-global/memory/shared/` 出現這則偏好（也可用 `index` 指令查看）。
+4. 用 AI B 開啟另一個資料夾 B、開新對話，請它說明適用的回報偏好，應該會照做。
+5. 在資料夾 A 指定一個**只限這個專案**的例外，整理後確認 B 不會收到這個例外。
+
+測試時不要使用私人機密資料。安裝結果若有 `warnings`（例如 Codex 未接通），先處理再驗證。
 
 若 AI 沒讀取入口、無法執行 Python，或要求檔案存取權限，先按該工具的支援方式處理；
-沒有成功保存或召回時，不能只憑回答語氣認定已接通。兩個 AI 的安全限制與授權不會互相繞過。
+沒有實際筆記或召回時，不能只憑回答語氣認定已接通。怎麼說會被記住、整理時機與查詢指令，
+見 [README 的使用方法與技巧](https://github.com/Jason5330/jason-memory#使用方法與技巧)（全局版把設定與工具路徑換成
+`~/.jason-memory-global/framework/` 下的檔案，並加 `--project 目前資料夾`）。兩個 AI 的安全限制與授權不會互相繞過。
 所有筆記變更經由共用寫入工具序列化並健檢；直接手動改檔不受其並行保護。
 
 ## 匯出

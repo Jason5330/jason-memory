@@ -20,6 +20,7 @@ PACKAGE_FILES = {
     'tools/claude_memory_hook.py': 'tools/claude_memory_hook.py',
     'tools/hook_settings.py': 'tools/hook_settings.py',
     'docs/memory-runtime.md': 'docs/memory-runtime.md',
+    'docs/ledger-format.md': 'docs/ledger-format.md',
     'tests/hooks-validation.md': 'tests/hooks-validation.md',
     "global/README.md": "README.md",
     "global/INSTALL.cmd": "INSTALL.cmd",

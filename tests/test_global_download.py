@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXPECTED = {
     "UNINSTALL.bat", "tools/purge_memory.py", "docs/uninstall.md", "uninstall-manifest.json",
     "tools/memory_facts.py", "tools/memory_runtime.py", "tools/memory_ledger.py", "tools/memory_dream.py", "tools/codex_notify.py", "tools/claude_memory_hook.py",
-    "tools/hook_settings.py", "docs/memory-runtime.md", "tests/hooks-validation.md",
+    "tools/hook_settings.py", "docs/memory-runtime.md", "docs/ledger-format.md", "tests/hooks-validation.md",
     "README.md", "INSTALL.cmd", "LICENSE", "global/install.py",
     "global/global_store.py", "global/SKILL.md", "templates/MEMORY.md",
     "tools/jason_check.py", "tools/jason_doctor.py",

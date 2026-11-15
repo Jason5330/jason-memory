@@ -24,7 +24,7 @@ class GlobalInstallTests(unittest.TestCase):
         self.home = self.base / "shared home"
         for relative in ("global/SKILL.md", "global/global_store.py", "templates/MEMORY.md",
                          "tools/jason_check.py", "tools/jason_doctor.py", "tools/memory_runtime.py", "tools/memory_ledger.py", "tools/memory_dream.py", "tools/codex_notify.py",
-                         "tools/memory_facts.py", "tools/claude_memory_hook.py", "docs/memory-runtime.md"):
+                         "tools/memory_facts.py", "tools/claude_memory_hook.py", "docs/memory-runtime.md", "docs/ledger-format.md"):
             path = self.package / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("fixture: " + relative, encoding="utf-8")

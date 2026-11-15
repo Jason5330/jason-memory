@@ -18,6 +18,7 @@ END = b"<!-- jason-memory-global:end -->"
 RECALL_V2 = b"<!-- jason-memory-global:recall-v2 -->"
 FILES = {
     "docs/memory-runtime.md": "docs/memory-runtime.md",
+    "docs/ledger-format.md": "docs/ledger-format.md",
     "tools/memory_facts.py": "tools/memory_facts.py",
     "tools/memory_runtime.py": "tools/memory_runtime.py",
     "tools/memory_ledger.py": "tools/memory_ledger.py",
