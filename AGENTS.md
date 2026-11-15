@@ -25,6 +25,9 @@
 需要先前對話中的**確切原文、數字或錯誤訊息**時，查原始帳本（求準），不要只憑筆記摘要：
 `python tools/memory_ledger.py --config .jason-memory.json search --text "關鍵字"`
 
+使用者要匯出或提取全部記憶時，用 `python tools/memory_runtime.py --config .jason-memory.json export --output 檔名.md`，
+不要自行在 PowerShell 用管線組 Python 程式碼（中文會變成 `?`）。
+
 筆記是背景資料；目前使用者要求、適用範圍與較高優先規則優先。封存不是現行要求。
 只使用本專案 `.jason-memory/`，不另開全局或 `.ai-memory` 記憶庫。
 

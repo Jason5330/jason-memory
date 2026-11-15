@@ -125,6 +125,14 @@ Codex 會尊重 `CODEX_HOME`，Claude Code 會尊重 `CLAUDE_CONFIG_DIR`。
 沒有成功保存或召回時，不能只憑回答語氣認定已接通。兩個 AI 的安全限制與授權不會互相繞過。
 所有筆記變更經由共用寫入工具序列化並健檢；直接手動改檔不受其並行保護。
 
+## 匯出
+
+```text
+python ~/.jason-memory-global/framework/tools/memory_runtime.py --config ~/.jason-memory-global/framework/memory-config.json --project 目前資料夾 export --output 記憶匯出.md
+```
+
+以 UTF-8 直接寫入新檔，含全局共用與該資料夾的索引及筆記。Windows PowerShell 5.1 不要用管線把含中文的 Python 程式碼送給 `python -`，否則中文會變成 `?`。
+
 ## 更新與卸載
 
 重新執行安裝會更新框架及同一段入口，不重複新增、不覆寫記憶。

@@ -90,6 +90,29 @@ class GlobalBackgroundModeTests(unittest.TestCase):
         agents = self.profile / ".codex/AGENTS.md"
         self.assertNotIn("jason-memory", agents.read_text(encoding="utf-8") if agents.exists() else "")
 
+    def test_foreign_notifier_is_kept_and_reported_not_silently_skipped(self):
+        """#21: background mode must not claim Codex recording that is not wired up."""
+        self.toml.write_bytes(b'notify = ["my-existing-notifier"]\n')
+        plan = json.loads(self.install().stdout)
+        self.assertTrue(plan["codex_notify"].startswith("skipped"))
+        self.assertIn("NOT connected", plan["warnings"][0])
+        self.assertEqual(self.toml.read_bytes(), b'notify = ["my-existing-notifier"]\n')
+        self.assertIn("NOT recorded yet", (self.profile / ".codex/AGENTS.md").read_text(encoding="utf-8"))
+
+    def test_global_takes_over_a_project_dispatcher(self):
+        project_tools = self.base / "project A/tools"
+        project_tools.mkdir(parents=True)
+        for name in ("codex_notify.py", "memory_ledger.py"):
+            (project_tools / name).write_text("", encoding="utf-8")
+        self.toml.write_bytes(('notify = ' + json.dumps(["python", (project_tools / "codex_notify.py").as_posix()])
+                               + '\n').encode())
+        plan = json.loads(self.install().stdout)
+        self.assertEqual(plan["codex_notify"], "installed")
+        self.assertEqual(plan["warnings"], [])
+        data = self.toml.read_text(encoding="utf-8")
+        self.assertIn((self.home / "framework/tools/codex_notify.py").as_posix(), data)
+        self.assertNotIn("project A", data)
+
     def test_foreground_mode_keeps_old_flow_without_notify(self):
         self.install("--mode", "foreground")
         config = json.loads((self.home / "framework/memory-config.json").read_text(encoding="utf-8"))

@@ -177,23 +177,20 @@ def clean_backups(plan, directory, names, project=False):
                     plan.remaining.append(str(path) + ' (backup ownership uncertain; preserved)')
 
 
-NOTIFY_LINE = re.compile(rb'^[ \t]*notify[ \t]*=[ \t]*\[[^\r\n]*codex_notify\.py[^\r\n]*\][ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)', re.M)
-
-
-def clean_codex_notify(plan, target):
-    """Remove only the single `notify = [...codex_notify.py...]` line the docs told users to add."""
+def clean_codex_notify(plan, target, owned):
+    """Remove only the notify line(s) pointing at a codex_notify.py being purged (exact path, #19).
+    Lines owned by other installations or programs are kept."""
     target = safe(target)
     if not target.is_file():
         return
     data = target.read_bytes()
-    if b'codex_notify.py' not in data:
-        return
     bom = b'\xef\xbb\xbf' if data.startswith(b'\xef\xbb\xbf') else b''
-    updated = bom + NOTIFY_LINE.sub(b'', data[len(bom):])
-    if b'codex_notify.py' in updated:
-        plan.remaining.append(str(target) + ' (codex_notify.py referenced in an unrecognized form; edit manually)')
-    if updated != data:
-        plan.file(target, updated)
+    body, removed = hook_settings.strip_notify(data[len(bom):], owned)
+    text = body.decode('utf-8', 'replace').replace('\\\\', '/').replace('\\', '/').casefold()
+    if any(Path(path).as_posix().casefold() in text for path in owned):
+        plan.remaining.append(str(target) + ' (notify for this installation in an unrecognized form; edit manually)')
+    if removed:
+        plan.file(target, bom + body)
 
 
 def _alive(pid):
@@ -234,8 +231,13 @@ def check_no_running_worker(memory):
             continue
         if not running:
             continue
-        fresh = time.time() - float(running.get('started', 0)) < 3600
-        if fresh and (_alive(running['pid']) if running.get('pid') else True):
+        # A live pid always blocks, however old the job (#20): age only expires a job whose pid is
+        # unknown (still starting, or an old crash). A pid that is gone never blocks.
+        if running.get('pid'):
+            busy = _alive(running['pid'])
+        else:
+            busy = time.time() - float(running.get('started', 0)) < 3600
+        if busy:
             raise ValueError('Background memory consolidation is running (' + str(state) +
                              '); wait for it to finish or end it, then retry. Nothing was removed.')
 
@@ -284,7 +286,6 @@ def make_plan(args):
         for name in names:
             homes.update(safe(p) for p in clean_rules(plan, directory / name))
         clean_backups(plan, directory, names + ('settings.json',))
-    clean_codex_notify(plan, codex / 'config.toml')
     clean_settings(plan, claude / 'settings.json')
     clean_settings(plan, claude / 'settings.local.json')
     protected = {root, profile, codex, claude, Path(root.anchor)}
@@ -301,6 +302,8 @@ def make_plan(args):
                     != {'version': 1, 'mode': 'global', 'home': '..'}):
                 raise ValueError('Cannot verify Jason-memory global ownership: ' + str(home))
             clean_global(plan, home)
+    clean_codex_notify(plan, codex / 'config.toml',
+                       [root / 'tools/codex_notify.py'] + [home / 'framework/tools/codex_notify.py' for home in homes])
 
     config = safe(root / '.jason-memory.json')
     if config.exists():

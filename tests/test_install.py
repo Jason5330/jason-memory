@@ -81,6 +81,43 @@ class InstallBothHostsTests(unittest.TestCase):
         self.assertEqual(self.toml.read_bytes(), b'model = "x"\n')
         self.assertFalse((self.project / '.claude/settings.json').exists())
 
+    def make_dispatcher(self, folder):
+        """A stand-in for another Jason-memory installation's tools folder."""
+        tools = self.project.parent / folder / 'tools'
+        tools.mkdir(parents=True)
+        (tools / 'codex_notify.py').write_text('', encoding='utf-8')
+        (tools / 'memory_ledger.py').write_text('', encoding='utf-8')
+        return tools / 'codex_notify.py'
+
+    def test_project_b_shares_a_and_uninstalling_b_keeps_a(self):
+        """#19: ownership is the exact script path, not the file name."""
+        a = self.make_dispatcher('A')
+        original = ('notify = ' + json.dumps(['python', a.as_posix()]) + '\nmodel = "x"\n').encode()
+        self.toml.write_bytes(original)
+        self.assertTrue(self.install()['codex_notify'].startswith('shared'))
+        self.assertEqual(self.toml.read_bytes(), original)
+        self.assertTrue(self.install('--uninstall')['codex_notify'].startswith('kept'))
+        self.assertEqual(self.toml.read_bytes(), original)
+
+    def test_unrelated_script_with_the_same_name_is_foreign(self):
+        tool = self.project.parent / 'my-unrelated-tool'
+        tool.mkdir()
+        (tool / 'codex_notify.py').write_text('', encoding='utf-8')
+        original = ('notify = ' + json.dumps([(tool / 'codex_notify.py').as_posix()]) + '\n').encode()
+        self.toml.write_bytes(original)
+        result = self.install()
+        self.assertTrue(result['codex_notify'].startswith('skipped'))
+        self.assertIn('NOT connected', result['warnings'][0])
+        self.assertEqual(self.toml.read_bytes(), original)
+
+    def test_stale_jason_line_is_replaced(self):
+        gone = (self.project.parent / 'deleted-copy/tools/codex_notify.py').as_posix()
+        self.toml.write_bytes(('notify = ' + json.dumps(['python', gone]) + '\n').encode())
+        self.assertEqual(self.install()['codex_notify'], 'installed')
+        data = self.toml.read_text(encoding='utf-8')
+        self.assertNotIn('deleted-copy', data)
+        self.assertIn((ROOT / 'tools/codex_notify.py').as_posix(), data)
+
 
 if __name__ == '__main__':
     unittest.main()

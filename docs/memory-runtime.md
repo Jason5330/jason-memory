@@ -150,6 +150,11 @@ python tools/memory_runtime.py --config .jason-memory.json read --note user/xxx.
 無異動的 `UserPromptSubmit` 與無保存宣告的 `Stop` 以檔名／大小／mtime 指紋判斷，跳過整庫健檢。
 `context` 保留給更正、衝突整理與批次 `apply` 前取得 revision。
 
+## 匯出
+
+`export --output 新檔.md` 把各範圍的索引與現行筆記寫成一份 UTF-8 Markdown，不覆蓋既有檔案，也不含封存、
+收據與原始帳本。由 Python 直接寫檔，不經主控台；Windows PowerShell 5.1 以管線傳送含中文的程式碼會變成 `?`（#27）。
+
 ## remember 的類型
 
 `remember --type user|feedback|project|reference`，預設 `feedback`。筆記放在同名子目錄，
@@ -205,7 +210,7 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   其他專案貢獻且未受更正的共用筆記會保留。若重建期間專案或共用筆記有更新，重建會回報衝突並保留新寫入。
   發布中斷後，下次開啟全局庫時會完成待處理的共用和專案更新。
 - **單一整理工作**：一般整理與重建共用 `dream.json` 的 `running` 欄位（含擁有者識別碼與程序 pid），
-  同一時間只有一個；程序已結束或超過一小時即不再阻擋。只有目前的擁有者能結束工作、推進游標或記錄錯誤，
+  同一時間只有一個；程序已結束或超過一小時即不再阻擋整理（一鍵清除則只要程序還活著就一律停止）。只有目前的擁有者能結束工作、推進游標或記錄錯誤，
   過期被取代的 worker 不會改動任何狀態；整理成功後若期間又累積到門檻，立即接著啟動下一輪；
   啟動失敗（找不到執行檔、權限不足）也會清除並記錄錯誤，下次觸發重試。
 - **來源完整性**：每次整理前重算整條雜湊鏈，並比對游標推進時記下的 checkpoint（`cursor_hash`），

@@ -272,11 +272,30 @@ class PurgeTests(unittest.TestCase):
 
     def test_unrecognized_notify_reference_is_reported_not_guessed(self):
         config = self.profile / '.codex/config.toml'
-        original = b'notify = [\n  "python",\n  "/x/tools/codex_notify.py",\n]\n'
+        script = (self.project / 'tools/codex_notify.py').as_posix().encode()
+        original = b'notify = [\n  "python",\n  "' + script + b'",\n]\n'
         self.put(config, original)
         result = self.run_cli(self.project / 'tools/purge_memory.py', code=2)
-        self.assertIn('codex_notify.py referenced', result.stdout)
+        self.assertIn('unrecognized form', result.stdout)
         self.assertEqual(config.read_bytes(), original)
+
+    def test_other_installations_notify_is_kept(self):
+        """#19: purging package A never removes the notify line that belongs to installation B."""
+        config = self.profile / '.codex/config.toml'
+        original = b'notify = ["python", "/projects/B/tools/codex_notify.py"]\nmodel = "x"\n'
+        self.put(config, original)
+        self.run_cli(self.project / 'tools/purge_memory.py')
+        self.assertEqual(config.read_bytes(), original)
+
+    def test_live_worker_blocks_even_after_an_hour(self):
+        """#20: a live pid always blocks cleanup, whatever its age."""
+        import time
+        state = self.project / '.jason-memory/.raw/dream.json'
+        self.put(state, json.dumps({'cursor': 0, 'running': {
+            'owner': 'x', 'kind': 'dream', 'started': time.time() - 7200, 'upto': 1, 'pid': os.getpid()}}).encode())
+        result = self.run_cli(self.project / 'tools/purge_memory.py', code=1)
+        self.assertIn('consolidation is running', result.stderr)
+        self.assertTrue((self.project / '.jason-memory').exists())
 
     def test_running_background_worker_blocks_cleanup(self):
         import time

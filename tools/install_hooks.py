@@ -74,6 +74,8 @@ def main(argv=None):
                 if not args.dry_run and updated != original:
                     write_with_backup(toml, original, updated)
             result.update(codex_config=str(toml), codex_notify=status)
+            if background and not args.uninstall and status.startswith('skipped: another'):
+                result['warnings'] = ['Codex is NOT connected to background memory: ' + status]
         print(json.dumps(result))
         return 0
     except (OSError, ValueError, TypeError) as exc:

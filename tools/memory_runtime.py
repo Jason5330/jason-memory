@@ -497,6 +497,33 @@ def bounded_index(roots, budget=INDEX_BUDGET):
     return result
 
 
+def export(roots, output):
+    """Write every scope's index and active notes to one UTF-8 Markdown file (#27).
+    Python writes the file itself, so no console or PowerShell pipe can turn Chinese into '?'."""
+    output = Path(output).absolute()
+    if output.exists():
+        raise ValueError('Export target already exists; choose a new file: ' + str(output))
+    for root in roots.values():
+        if output == root or root in output.parents:
+            raise ValueError('Export target must be outside the memory store')
+    labels = {'global': '全局共用記憶', 'project': '本專案記憶'}
+    parts = ['# 記憶匯出（Jason-memory）\n\n匯出日期：' + date.today().isoformat() +
+             '。只含索引與現行筆記，不含封存、收據與原始帳本。\n']
+    count = 0
+    for scope, root in sorted(roots.items(), key=lambda item: item[0] != 'global'):
+        data = notes(root)
+        count += len(data)
+        parts.append('\n## ' + labels.get(scope, scope) + '（' + str(len(data)) + ' 則）\n\n'
+                     '來源：`' + str(root) + '`\n\n### 索引\n\n' + read_index(root).strip() + '\n')
+        for name, content in sorted(data.items()):
+            parts.append('\n### ' + name + '\n\n' + content.strip() + '\n')
+    text = ''.join(parts)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open('x', encoding='utf-8', newline='\n') as stream:
+        stream.write(text)
+    return {'output': str(output), 'notes': count, 'bytes': len(text.encode('utf-8'))}
+
+
 def read_notes(root, names, budget=MAX_BYTES):
     """Read only the selected notes (no receipt, no write)."""
     if not names:
@@ -527,7 +554,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path)
-    parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify', 'remember', 'index', 'read'])
+    parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify', 'remember', 'index', 'read', 'export'])
     parser.add_argument('--scope', choices=['project', 'global'], default='project')
     parser.add_argument('--plan', type=Path)
     parser.add_argument('--note', action='append', default=[])
@@ -538,6 +565,7 @@ def main():
     parser.add_argument('--type', dest='kind', choices=NOTE_TYPES, default=None,
                         help='user=identity/role, feedback=preference/rule, project=project constraint, reference=pointer')
     parser.add_argument('--max-bytes', type=int, default=None)
+    parser.add_argument('--output', type=Path, help='export: new UTF-8 Markdown file to create')
     args = parser.parse_args()
     try:
         with opened(args.config, args.project) as (cfg, project, roots):
@@ -564,6 +592,10 @@ def main():
                 result = verify(roots[args.scope], args.note)
             elif args.command == 'index':
                 result = {'project': str(project), 'stores': bounded_index(roots, args.max_bytes or INDEX_BUDGET)}
+            elif args.command == 'export':
+                if args.output is None:
+                    raise ValueError('export requires --output FILE.md')
+                result = export(roots, args.output)
             elif args.command == 'read':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')

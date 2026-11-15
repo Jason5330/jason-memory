@@ -157,9 +157,36 @@ def main(argv=None):
         if args.agent in ("claude", "both"):
             targets.append(legacy_claude)
         background = args.mode == "background"
-        rules = background_instructions if background else instructions
-        block = START + rules(home) + END
         edits = []
+        warnings = []
+        notify_status = None
+        if args.agent in ("codex", "both"):
+            # Codex has no hooks: its notify program records each turn in the raw ledger.
+            toml = codex / "config.toml"
+            if toml.is_symlink():
+                raise ValueError("Redirected Codex config is not supported: " + str(toml))
+            original = toml.read_bytes() if toml.exists() else b""
+            updated, notify_status = hook_settings.merged_notify(
+                original, sys.executable, home / "framework/tools/codex_notify.py",
+                uninstall=args.uninstall or not background, takeover=True)
+            if updated != original:
+                edits.append((toml, original, updated, toml.exists()))
+            if background and not args.uninstall and notify_status.startswith("skipped"):
+                # Never promise automatic recording that is not wired up (#21).
+                warnings.append("Codex is NOT connected to background memory: " + notify_status)
+        codex_unwired = bool(warnings)
+
+        def rules(home):
+            if not background:
+                return instructions(home)
+            text = background_instructions(home)
+            if codex_unwired:
+                text += ("WARNING for Codex: this machine's Codex notify is another program, so Codex "
+                         "conversations are NOT recorded yet. If the user asks to remember something in Codex, "
+                         "tell them it will not be kept until codex_notify.py is connected.\n\n").encode("utf-8")
+            return text
+
+        block = START + rules(home) + END
         for target in targets:
             original = target.read_bytes() if target.exists() else b""
             span = managed_span(original, target)
@@ -174,18 +201,6 @@ def main(argv=None):
                 updated = bom + target_block + unmanaged[len(bom):]
             if updated != original:
                 edits.append((target, original, updated, target.exists()))
-
-        if args.agent in ("codex", "both"):
-            # Codex has no hooks: its notify program records each turn in the raw ledger.
-            toml = codex / "config.toml"
-            if toml.is_symlink():
-                raise ValueError("Redirected Codex config is not supported: " + str(toml))
-            original = toml.read_bytes() if toml.exists() else b""
-            updated, _ = hook_settings.merged_notify(
-                original, sys.executable, home / "framework/tools/codex_notify.py",
-                uninstall=args.uninstall or not background)
-            if updated != original:
-                edits.append((toml, original, updated, toml.exists()))
 
         copies = []
         if args.agent in ('claude', 'both'):
@@ -220,6 +235,7 @@ def main(argv=None):
             if index.exists() and not index.is_file():
                 raise ValueError("Shared index is not a file: " + str(index))
         plan = {"dry_run": args.dry_run, "uninstall": args.uninstall, "mode": args.mode,
+                "codex_notify": notify_status, "warnings": warnings,
                 "home": str(home), "edit": [str(item[0]) for item in edits],
                 "copy": [str(item[0]) for item in copies],
                 "initialize_if_missing": [] if args.uninstall or index.exists() else [str(index)],

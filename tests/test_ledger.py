@@ -648,5 +648,45 @@ class BackgroundModeTests(Base):
         self.assertEqual(kinds, [('prompt', '只答 45'), ('assistant', '45')])
 
 
+
+
+class ExportTests(Base):
+    """#27: export writes UTF-8 itself, so an ASCII console/pipe cannot corrupt Chinese text."""
+
+    def test_export_keeps_chinese_with_an_ascii_console(self):
+        import os
+        import subprocess
+        self.remember('report.order', '回報先列結論，再說明原因')
+        target = self.project / 'exports' / '記憶匯出.md'
+        env = dict(os.environ, PYTHONIOENCODING='ascii', PYTHONUTF8='0')
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/memory_runtime.py'), '--config', str(self.config),
+                                 'export', '--output', str(target)], capture_output=True, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = target.read_bytes().decode('utf-8')
+        self.assertIn('# 記憶匯出（Jason-memory）', text)
+        self.assertIn('回報先列結論，再說明原因', text)
+        self.assertNotIn('??', text)
+        again = subprocess.run([sys.executable, str(ROOT / 'tools/memory_runtime.py'), '--config', str(self.config),
+                                'export', '--output', str(target)], capture_output=True, env=env)
+        self.assertEqual(again.returncode, 1)  # Never overwrites an earlier export.
+
+@unittest.skipUnless(sys.platform == 'win32', 'Windows console behaviour')
+class WindowsNoConsoleWindowTests(unittest.TestCase):
+    """#28: background processes must not pop up empty terminal windows."""
+
+    def test_worker_and_children_use_a_hidden_console(self):
+        from unittest.mock import patch
+        import subprocess
+        import memory_dream as dream
+        with patch.object(subprocess, 'Popen') as popen:
+            ledger._spawn(['x'])
+        flags = popen.call_args.kwargs['creationflags']
+        self.assertTrue(flags & 0x08000000)          # CREATE_NO_WINDOW
+        self.assertFalse(flags & 0x00000008)         # not DETACHED_PROCESS
+        with patch.object(subprocess, 'run') as run:
+            run.return_value.returncode, run.return_value.stdout = 0, b'JASON_DREAM_STATUS: ok'
+            dream._run_agent(['agent'], '', {}, Path.cwd())
+        self.assertTrue(run.call_args.kwargs['creationflags'] & 0x08000000)
+
 if __name__ == '__main__':
     unittest.main()

@@ -297,7 +297,21 @@ doctor 保留 **1 MiB 索引／4 MiB 單篇筆記的解析保護**，超過時�
 
 先暫停寫入並健檢，把完整記憶目錄（含索引、筆記及 `archive/`）複製到使用者選定的本機備份位置。備份放在活躍記憶庫外，避免被當成重複筆記。
 
-換機時用使用者選擇的方式傳輸，還原到新專案、更新規則中的記憶／框架路徑，再健檢與抽查內容。記憶預設 git-ignore，**git clone 不會攜帶它**。目前提供的是手動流程，沒有自動備份或匯入／匯出工具。
+換機時用使用者選擇的方式傳輸，還原到新專案、更新規則中的記憶／框架路徑，再健檢與抽查內容。記憶預設 git-ignore，**git clone 不會攜帶它**。備份仍是手動複製；沒有自動備份或匯入工具。
+
+**匯出成一份 Markdown（閱讀或換機用）：**
+
+```text
+python tools/memory_runtime.py --config .jason-memory.json export --output 記憶匯出.md
+```
+
+由 Python 直接以 UTF-8 寫入新檔案（不覆蓋既有檔），內容為各範圍的索引與現行筆記。全局版加上
+`--project 目前資料夾`，會同時匯出全局共用與該資料夾的記憶。
+
+**Windows PowerShell 5.1 注意：** 不要用 `@' ... '@ | python -` 這種管線把含中文的 Python 程式碼送進去；
+PowerShell 5.1 預設 `$OutputEncoding` 是 ASCII，中文會在傳送時變成 `?` 並寫進檔案。改用上面的 `export`，
+或把程式碼存成 UTF-8 的 `.py` 檔再執行；必須用管線時，先執行
+`$OutputEncoding = New-Object System.Text.UTF8Encoding($false)`。
 
 錯誤或過時的筆記預設封存，移除活躍指標，保留一個指向封存索引的入口及取代關係。永久刪除依使用者指示。doctor 不檢查封存內容，重新啟用前需再次確認。
 

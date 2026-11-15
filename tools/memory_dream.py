@@ -166,6 +166,7 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
 def _run_agent(command, text, env, project):
     """Run the agent; success needs exit 0 AND its explicit ok status line (else retry later)."""
     result = subprocess.run(command, input=text.encode('utf-8'), env=env, cwd=str(project),
+                            creationflags=ledger.NO_WINDOW,
                             stdout=subprocess.PIPE, timeout=1800)
     output = result.stdout.decode('utf-8', 'replace')
     sys.stdout.write(output)
@@ -192,11 +193,13 @@ def rebuild(config, project, opts, runner=None):
         revisions = {scope: runtime.revision(path) for scope, path in roots.items()}
         global_mode = cfg['mode'] == 'global'
         shared_notes = runtime.notes(roots['global']) if global_mode else {}
-        staging_parent = ledger.raw_root(root)
+        # Global staging nests a whole home (memory/projects/<64 hex>/...); keep it shallow so Windows
+        # paths stay under MAX_PATH. It lives in the memory tree, so one-click purge removes leftovers.
+        staging_parent = roots['global'].parent if global_mode else ledger.raw_root(root)
         owner = ledger.claim_job(root, 'rebuild', head)
         if owner is None:
             return dict(result, exit_code=75, error='another consolidation job is running; retry later')
-        staging = staging_parent / ('rebuild-' + owner)
+        staging = staging_parent / (('.rebuild-' + owner[:12]) if global_mode else ('rebuild-' + owner))
 
     result['records'] = head
     error = None

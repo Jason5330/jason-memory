@@ -29,6 +29,7 @@ import memory_runtime as runtime
 LEDGER = 'ledger.jsonl'
 TEXT_CAP = 64 * 1024  # Per-field cap for conversation text; longer content is truncated and marked.
 STALE_SECONDS = 3600
+NO_WINDOW = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
 DEFAULT_SETTINGS = {'enabled': False, 'dream_every': 20, 'dream_command': None,
                     'dream_agent': 'auto', 'foreground_writes': True}
 
@@ -306,7 +307,9 @@ def _spawn(command):
     kwargs = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL,
               'close_fds': True}
     if os.name == 'nt':
-        kwargs['creationflags'] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        # CREATE_NO_WINDOW gives the worker a hidden console that its children inherit. DETACHED_PROCESS
+        # would leave it console-less, and Windows then opens a visible window for every child (#28).
+        kwargs['creationflags'] = NO_WINDOW | 0x00000200  # | CREATE_NEW_PROCESS_GROUP
     else:
         kwargs['start_new_session'] = True
     return subprocess.Popen(command, **kwargs)
@@ -337,7 +340,8 @@ def dream_run(config, project, upto, opts, owner=None):
     if upto > start:
         # The command runs outside the writer lock so foreground recall and saves never wait for it.
         try:
-            code = subprocess.call(opts['dream_command'], env=env, cwd=str(project), stdin=subprocess.DEVNULL)
+            code = subprocess.call(opts['dream_command'], env=env, cwd=str(project), stdin=subprocess.DEVNULL,
+                                   creationflags=NO_WINDOW)
         except OSError as exc:
             code = 127
             error = 'cannot start dream_command: ' + type(exc).__name__
