@@ -8,6 +8,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -458,6 +459,9 @@ def remember(root, subject, key, value, why, scope='project', kind=None):
                 else:
                     matches.append(name)
     if matches and not retype:
+        upgraded = upgrade_sources(root, data, sorted(set(matches)), why, scope)
+        if upgraded is not None:
+            return upgraded
         return verify(root, sorted(set(matches)))
     prefix = 'preference' if kind == 'feedback' else kind
     slug = prefix + '-' + hashlib.sha256((subject + '\0' + key).encode('utf-8')).hexdigest()[:16]
@@ -480,6 +484,35 @@ def remember(root, subject, key, value, why, scope='project', kind=None):
             'retire': sorted(set(retype) - {name})}
     result = apply(root, plan, scope)
     result['saved_fact'] = {'subject': subject, 'predicate': key, 'value': value, 'type': kind}
+    return result
+
+
+SOURCE_REF = re.compile(r'(?:local|[0-9a-f]{16}):\d+:[0-9a-f]{12}')
+WHY_LINE = re.compile(r'^Why: .*$', re.M)
+
+
+def upgrade_sources(root, data, names, why, scope):
+    """Same fact re-sent with a full source reference (#32): replace a legacy `ledger seq N` Why
+    line so the note can be traced across projects. Notes that already cite every new reference
+    are left untouched (idempotent). Returns the apply result, or None when nothing changes."""
+    refs = SOURCE_REF.findall(why)
+    if not refs:
+        return None
+    updates = {}
+    for name in names:
+        content = data[name]
+        if all(ref in content for ref in refs):
+            continue
+        if len(WHY_LINE.findall(content)) != 1:
+            continue  # Hand-written or multi-fact note: keep it; batch apply can migrate it.
+        updated = WHY_LINE.sub(lambda _: 'Why: ' + why, content, count=1)
+        updated = re.sub(r'^updated: .*$', 'updated: ' + date.today().isoformat(), updated, count=1, flags=re.M)
+        updates[name] = updated
+    if not updates:
+        return None
+    result = apply(root, {'expected_revision': revision_for(data, read_index(root)),
+                          'updates': updates, 'retire': []}, scope)
+    result['source_upgraded'] = sorted(updates)
     return result
 
 

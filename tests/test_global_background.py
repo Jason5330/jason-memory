@@ -3,6 +3,7 @@ one step, records conversations from any folder, and its UNINSTALL removes every
 import importlib.util
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -148,6 +149,54 @@ class GlobalBackgroundModeTests(unittest.TestCase):
                              workspace, "export", "--output", sneaky, code=1)
         self.assertIn("outside the memory store", result.stderr)
         self.assertFalse((self.home / "memory/shared/x.md").exists())
+
+    def test_rebuild_upgrades_legacy_shared_source_to_a_full_reference(self):
+        """#32: a legacy `ledger seq 1` shared note gets the full store:seq:hash reference on rebuild,
+        and another project can resolve it with source --ref."""
+        worker = self.base / 'ref_worker.py'
+        worker.write_text('''
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+text = sys.stdin.buffer.read().decode('utf-8')
+prefix = next(line for line in text.splitlines() if line.startswith('指令前綴（Bash）：'))
+target = re.search(r"--config (?:'([^']+)'|(\\S+))", prefix)
+config = next(value for value in target.groups() if value)
+ref = re.search(r'\\[ref (\\S+) ', text).group(1)
+subprocess.run([sys.executable, sys.argv[1], '--config', config, '--project', str(Path.cwd()),
+                'remember', '--scope', 'global', '--subject', 'qa', '--key', 'legacy',
+                '--value', 'QA_SHARED_LEGACY_UTC', '--why', '來源：ledger ' + ref], check=True)
+print('JASON_DREAM_STATUS: ok')
+''', encoding='utf-8')
+        self.install()
+        framework = self.home / 'framework'
+        config = framework / 'memory-config.json'
+        runtime, ledger, dream = (framework / 'tools' / n for n in ('memory_runtime.py', 'memory_ledger.py', 'memory_dream.py'))
+        cfg = json.loads(config.read_text(encoding='utf-8'))
+        cfg['ledger']['dream_agent'] = [sys.executable, str(worker), str(runtime)]
+        config.write_text(json.dumps(cfg), encoding='utf-8')
+        a, b = self.base / 'A', self.base / 'B'
+        a.mkdir()
+        b.mkdir()
+        self.run_py(ledger, '--config', config, '--project', b, 'append', '--kind', 'prompt',
+                    '--data', json.dumps({'text': 'Across all projects, use QA_SHARED_LEGACY_UTC.'}))
+        self.env['JASON_DREAM'] = '1'
+        try:
+            self.run_py(runtime, '--config', config, '--project', b, 'remember', '--scope', 'global',
+                        '--subject', 'qa', '--key', 'legacy', '--value', 'QA_SHARED_LEGACY_UTC',
+                        '--why', '來源：ledger seq 1')
+        finally:
+            del self.env['JASON_DREAM']
+        rebuilt = json.loads(self.run_py(dream, '--config', config, '--project', b, 'rebuild', '--yes').stdout.splitlines()[-1])
+        self.assertTrue(rebuilt['rebuilt'], rebuilt)
+        shared = ''.join(p.read_text(encoding='utf-8') for p in (self.home / 'memory/shared').rglob('*.md')
+                         if p.name != 'MEMORY.md' and 'archive' not in p.parts)
+        ref = re.search(r'ledger ((?:[0-9a-f]{16}):1:[0-9a-f]{12})', shared).group(1)
+        self.assertNotIn('來源：ledger seq 1', shared)
+        found = json.loads(self.run_py(ledger, '--config', config, '--project', a, 'source', '--ref', ref).stdout)
+        self.assertEqual(found['record']['data']['text'], 'Across all projects, use QA_SHARED_LEGACY_UTC.')
 
     def test_foreground_mode_keeps_old_flow_without_notify(self):
         self.install("--mode", "foreground")

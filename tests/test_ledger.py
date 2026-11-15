@@ -669,6 +669,23 @@ class BackgroundModeTests(Base):
 
 
 
+class SourceUpgradeTests(Base):
+    def test_same_fact_with_full_reference_upgrades_once_then_is_idempotent(self):
+        """#32: re-sending the same fact with a full source reference updates only the Why line."""
+        with runtime.opened(self.config):
+            runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger seq 2')
+            upgraded = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger local:2:ab12cd34ef56')
+            self.assertEqual(len(upgraded['source_upgraded']), 1)
+            text = Path(upgraded['paths'][0]).read_text(encoding='utf-8')
+            self.assertIn('Why: 來源：ledger local:2:ab12cd34ef56', text)
+            self.assertNotIn('ledger seq 2', text)
+            self.assertIn('24 小時制', text)
+            again = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger local:2:ab12cd34ef56')
+            self.assertFalse(again['changed'])
+            plain = runtime.remember(self.root, 'user', 'clock', '24 小時制', '使用者再次確認')
+            self.assertFalse(plain['changed'])
+
+
 class ExportTests(Base):
     """#27: export writes UTF-8 itself, so an ASCII console/pipe cannot corrupt Chinese text."""
 

@@ -13,7 +13,7 @@
     "START_HERE.md": "4f7d91543160f1df50ebd9c34a37be2ffd78b71b84ac1d4eeabc0e29391e2df0",
     "UNINSTALL.bat": "032d73ed9d90feafb5b7b9c153d902fa7af5d57d65f6de23a66bd4ce49e4b35f",
     "docs/ledger-format.md": "8b4351ff849e89d2dd9d4657b7cfeb55004513139cac01bb06ef4f9180418ba7",
-    "docs/memory-runtime.md": "cff4ef7e3c3cc959a1903c5ae94ef7f8ab7fd1e13af799239b8f3454b0d8a0a8",
+    "docs/memory-runtime.md": "80daec8d419f7359884c3f0130c1108b52382c610ef4c14e40b02324429b6e51",
     "docs/superpowers/plans/2026-09-17-global-memory.md": "87740d1fdee4127d274a7fbeb11a999b367701b6e28ed3fd2b4f2779176b8bcb",
     "docs/uninstall.md": "c4aaa83a36909b0a56c9d978e069a1c29a5100080dc5cb8b089a5f6d023727df",
     "evals/README.md": "6517556637fff89f514f0ff9a656f75420e9501455c8b891828fa146ec5dfa11",
@@ -34,12 +34,12 @@
     "tests/hooks-validation.md": "f7ea6a7f74f0075e96a0674e2c0195a60e4289ecec075379e6e9694c8b3ea5b6",
     "tests/recall-validation.md": "0776310c300f154e6cdcadeef5952deff2cd2fcb14cdcf6f8367d1ae468a91ed",
     "tests/test_download.py": "9649e5b2eb89ec697a8455ee069dc60727a940287c325a62c5ede9545e49f4ba",
-    "tests/test_global_background.py": "9431ad4ecbadd942d6b4423ed0ecd4a7a28afe647fe268bfd31b25f4c7c71a77",
+    "tests/test_global_background.py": "982f21786e76e630c9cf3272bd34b6bcd985b89a8dedc8492bcc1a42f1e86337",
     "tests/test_global_download.py": "369d0cca375465d69bac9287486a9715eabd680f641af7dc2bb9686d86b85ded",
     "tests/test_global_install.py": "695d5871d34ad1f44012f5d9f832c7bd366197ccabe4d596dbe47565e25ba641",
     "tests/test_global_store.py": "b1446b7a73ef76341e0961e6bdbdca3cdecebb83584ce40b4acce5d3b945e608",
     "tests/test_install.py": "5b468fd134d0e22dcb56a06b1abcebc54c6cc3abd2b392ce490f2a389a6c003a",
-    "tests/test_ledger.py": "2bfe922a438dfdc4a21c83fce745b1cd65702da186d29501b9379bb63b32cd01",
+    "tests/test_ledger.py": "4860fada4879f76fe658741cdc62820a7962005b4d199a4f3e174642655fc8a9",
     "tests/test_memory_runtime.py": "2a471166e0952ba4edfdf696b8c7921c4f9c39c9b5cb658e258b0066b252cf37",
     "tests/test_memory_tools.py": "4766a5823389a95b1b929d084228234f19bde8135b213945e05dd03997b8762b",
     "tests/test_purge_memory.py": "4db419202f1b6a8839f46886854c5ef42f0c0ec781d551d44ffedb59ddc4a4bc",
@@ -54,7 +54,7 @@
     "tools/memory_dream.py": "b1be37bda4f0f161eac2b56ed6a6e396f47992550b1658e0ac46d1c6e44d0207",
     "tools/memory_facts.py": "f01a8e94dccef7aaff610cf7c6a72ff59875ce20096aadaca08c0f1a1a42e2a6",
     "tools/memory_ledger.py": "a356e6780f1cdb859c5a88edb1b25fabac8615099803b52f225c71d8c5efcdbf",
-    "tools/memory_runtime.py": "fc99f9e85f173004d5239c6a81546e6bea8cf3fe0d2ff627910db58e38d6096e",
+    "tools/memory_runtime.py": "26ad38b67117fea1849081aa8bab0e8351dd96253350e044576e737f6081ab28",
     "tools/purge_memory.py": "79e14fe47b411ab8fa4886175a73e4cc7de4bfcc234789eae0003b15faf25627"
   }
 }

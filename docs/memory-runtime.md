@@ -202,6 +202,8 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   「來源：ledger 識別碼:seq:雜湊前12碼」（專案版識別碼為 `local`，全局版為該專案帳本資料夾名稱前 16 碼）。
   每個專案的帳本都從 seq 1 開始，只寫 seq 會指錯帳本（#30）。`memory_ledger.py source --ref 編號`
   驗證整條帳本後回傳該筆原始紀錄，雜湊不符即報錯；全局版從任一專案都能查到其他專案的來源。
+  舊筆記只寫「ledger seq N」時，背景整理或 `rebuild` 以完整編號重送同一事實，`remember` 只更新該筆記的
+  `Why` 行（#32）；已含相同編號則不改檔。手寫或多事實筆記不自動改，可用 `apply` 批次移轉。
   Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
   成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error` 並於下次觸發重試；
   沒有新紀錄不重跑。`memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
