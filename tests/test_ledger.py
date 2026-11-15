@@ -759,6 +759,38 @@ class SourceUpgradeTests(Base):
             self.assertTrue(runtime.apply(self.root, {'expected_revision': runtime.revision(self.root),
                                                       'updates': {name: edited}, 'retire': []})['changed'])
 
+    def test_literal_examples_are_not_checked_as_active_sources(self):
+        """#42: literal examples can coexist with a verifiable citation in the same note."""
+        good, = self.refs('日期用 ISO')
+        fake = 'local:900:ab12cd34ef56'
+        with runtime.opened(self.config):
+            saved = runtime.remember(self.root, 'qa', 'example-format', 'ISO', f'來源：ledger `{good}`')
+            name = Path(saved['paths'][0]).relative_to(self.root).as_posix()
+            original = runtime.notes(self.root)[name]
+            examples = (f'\n```text\n{fake}\n```\n\n~~~~\n{fake}\n~~~~\n\n'
+                        f'    {fake}\n\n<!-- {fake} -->\n')
+            plan = {'expected_revision': runtime.revision(self.root), 'updates': {name: original + examples}, 'retire': []}
+            self.assertTrue(runtime.apply(self.root, plan)['changed'])
+            self.assertEqual(runtime.notes(self.root)[name], original + examples)
+            self.assertIn(good, runtime.notes(self.root)[name])
+            plan['expected_revision'] = runtime.revision(self.root)
+            plan['updates'][name] += f'\n來源：ledger `{fake}`\n'
+            with self.assertRaisesRegex(ValueError, 'does not resolve'):
+                runtime.apply(self.root, plan)
+            self.assertEqual(runtime.notes(self.root)[name], original + examples)
+
+    def test_rebuilding_a_legacy_source_even_when_the_same_ref_is_in_a_fence(self):
+        good, = self.refs('日期用 ISO')
+        with runtime.opened(self.config):
+            saved = runtime.remember(self.root, 'qa', 'legacy-fence', 'ISO', '來源：ledger seq 1')
+            name = Path(saved['paths'][0]).relative_to(self.root).as_posix()
+            note = runtime.notes(self.root)[name] + f'\n```text\n{good}\n```\n'
+            runtime.apply(self.root, {'expected_revision': runtime.revision(self.root),
+                                      'updates': {name: note}, 'retire': []})
+            migrated = runtime.remember(self.root, 'qa', 'legacy-fence', 'ISO', f'來源：ledger {good}')
+            self.assertTrue(migrated['changed'])
+            self.assertIn(f'Why: 來源：ledger {good}\n', runtime.notes(self.root)[name])
+
 
 class IntegrityTests(Base):
     ledger_cfg = {'enabled': True, 'dream_every': 1000}
@@ -782,6 +814,22 @@ class IntegrityTests(Base):
         self.assertEqual(record['data']['result']['input_tokens'], 12)
         self.assertEqual(record['data']['result']['note'], 'ok')
         self.assertNotIn(value, (ledger.raw_root(self.root) / 'ledger.jsonl').read_text(encoding='utf-8'))
+
+    def test_structured_redaction_handles_scalar_types_and_preserves_usage(self):
+        """#43: mask credential values, including numeric array leaves, without losing metrics."""
+        values = {'password': 987612, 'token': 981234, 'tokens': [123, {'code': False}],
+                  'clientSecret': True, 'X-API-Key': 'QA-only', 'service_token': 17,
+                  'accessTokens': [7], '私鑰': 5, 'token_count': '1240', 'tokenizer': 'sample_bpe',
+                  'max_output_tokens': '40', 'credentials_required': True, 'note': 'keep-me'}
+        expected = {'password': '[REDACTED]', 'token': '[REDACTED]',
+                    'tokens': ['[REDACTED]', {'code': '[REDACTED]'}],
+                    'clientSecret': '[REDACTED]', 'X-API-Key': '[REDACTED]', 'service_token': '[REDACTED]',
+                    'accessTokens': ['[REDACTED]'], '私鑰': '[REDACTED]', 'token_count': '1240',
+                    'tokenizer': 'sample_bpe', 'max_output_tokens': '40', 'credentials_required': True,
+                    'note': 'keep-me'}
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'tool', {'result': values})
+            self.assertEqual(ledger.replay(self.root)[-1]['data']['result'], expected)
 
     def test_corrupt_document_mirror_fails_verify_and_source(self):
         """#39: a mirrored blob whose bytes changed is reported, not served as the exact text."""
@@ -845,6 +893,35 @@ class IntegrityTests(Base):
         with runtime.opened(self.config):
             third = [r['kind'] for r in ledger.replay(self.root, 'matrix-codex') if r['data']['turn'] == 'matrix-turn-3']
         self.assertEqual(third, ['prompt', 'assistant'])
+
+    def test_redelivered_codex_turn_retries_a_failed_worker_without_appending(self):
+        """#41: a notification can retry work even when every turn record is already present."""
+        import codex_notify
+        cfg = runtime.read_json(self.config)
+        cfg['ledger'].update(dream_every=2, dream_command=[sys.executable, '-c', 'raise SystemExit(27)'])
+        self.config.write_text(json.dumps(cfg), encoding='utf-8')
+        payload = {'type': 'agent-turn-complete', 'thread-id': 'qa-session', 'turn-id': 'qa-turn',
+                   'cwd': str(self.project), 'input-messages': ['QA prompt'], 'last-assistant-message': 'QA result'}
+        self.assertEqual(codex_notify.handle(payload), 2)
+        self.assertIsNone(codex_notify.handle(payload))  # The first worker already owns the slot.
+        with runtime.opened(self.config):
+            owner = ledger.pending(self.root)['running']['owner']
+        opts = ledger.settings(self.config)
+        self.assertEqual(ledger.dream_run(self.config, self.project, 2, opts, owner), 27)
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['last_error']['code'], 27)
+            original = ledger.replay(self.root)
+        self.assertEqual(codex_notify.handle(payload), 2)
+        self.assertEqual(len(self.spawned_workers), 2)
+        with runtime.opened(self.config):
+            owner = ledger.pending(self.root)['running']['owner']
+            self.assertEqual(ledger.replay(self.root), original)
+        self.assertEqual(ledger.dream_run(self.config, self.project, 2,
+                                          dict(opts, dream_command=[sys.executable, '-c', 'pass']), owner), 0)
+        self.assertIsNone(codex_notify.handle(payload))
+        self.assertEqual(len(self.spawned_workers), 2)
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['cursor'], 2)
 
 
 class ExportTests(Base):

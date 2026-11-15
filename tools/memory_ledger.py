@@ -122,14 +122,27 @@ def verify_chain(existing):
     return {'records': count, 'head': previous}
 
 
-# Structured fields whose values are credentials whatever they look like (#38).
-SENSITIVE_KEY = re.compile(r'password|passwd|passphrase|^pass$|^pwd$|secret|token|api[_-]?key|access[_-]?key|'
-                           r'private[_-]?key|credential|authorization|^auth$|cookie|session[_-]?key|'
-                           r'密碼|密码|口令|金鑰|金钥|密鑰|密钥|憑證|凭证|權杖|令牌', re.I)
+# Match credential names and qualified suffixes, so token_count, tokenizer and usage keys stay readable.
+SENSITIVE_KEY = re.compile(
+    r'(?:^|_)(?:passwords?|passwd|passphrase|pass|pwd|secrets?|token|api_?key|access_?key|'
+    r'private_?key|credentials?|authorization|auth|cookies?|session_?key)$'
+    r'|^(?:(?:access|refresh|id|session|bearer|auth|api)_)?tokens$'
+    r'|(?:密碼|密码|口令|金鑰|金钥|密鑰|密钥|私鑰|私钥|憑證|凭证|權杖|令牌)$'
+)
+
+
+def sensitive_key(key):
+    key = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', str(key))
+    key = re.sub(r'[\s_-]+', '_', key).strip('_').casefold()
+    return bool(SENSITIVE_KEY.search(key))
 
 
 def _clip(value, sensitive=False):
-    if isinstance(value, str) and sensitive and value.strip():
+    if isinstance(value, dict):
+        return {str(k): _clip(v, sensitive or sensitive_key(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clip(v, sensitive) for v in value]
+    if sensitive and value is not None and (not isinstance(value, str) or value.strip()):
         return '[REDACTED]'
     if isinstance(value, str):
         value = memory_facts.redact(value)
@@ -137,10 +150,6 @@ def _clip(value, sensitive=False):
         if len(raw) > TEXT_CAP:
             return raw[:TEXT_CAP].decode('utf-8', 'ignore') + '…[truncated ' + str(len(raw)) + ' bytes]'
         return value
-    if isinstance(value, dict):
-        return {str(k): _clip(v, sensitive or bool(SENSITIVE_KEY.search(str(k)))) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_clip(v, sensitive) for v in value]
     return value
 
 

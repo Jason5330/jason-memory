@@ -209,10 +209,12 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   `Why` 行（#32）；已含相同編號則不改檔。改寫前會先用原始帳本驗證新編號，查不到或雜湊不符就報錯、
   保留原來源（#33；重建時驗證的是真正的帳本，不是暫存區）。一則筆記含多個事實時不自動改，
   以免蓋掉其他事實的來源（#34），可用 `apply` 批次移轉。首次 `remember` 與 `apply` 也會驗證新增的來源編號（#36）；
-  多一碼或少一碼的編號與 `source --ref` 一樣視為無效（#35）。
+  多一碼或少一碼的編號與 `source --ref` 一樣視為無效（#35）。正文和行內反引號中的引用都會檢查，
+  Markdown 程式碼區塊與 HTML 註解中的格式範例可原樣保存（#42）。
   Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
-  成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error` 並於下次觸發重試；
-  沒有新紀錄不重跑。`memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
+  成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error`。Codex 重送相同通知時，
+  已保存的事件會去重，只要待整理紀錄仍達門檻且沒有執行中的工作，就會重試（#41）。
+  `memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
 - **重建**：`python tools/memory_dream.py --config .jason-memory.json rebuild --yes` 先在
   `.raw/rebuild-*` 暫存庫從整份帳本重新整理，整理成功才發布現行筆記（舊筆記封存）。整理失敗會保留現行筆記、
   回傳非零 exit code 並記 `last_error`。重建期間現行筆記若被改動（例如 `foreground_writes: true`），

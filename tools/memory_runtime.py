@@ -383,7 +383,7 @@ def prepare_apply(root, plan, scope, sources=None):
             if leaked:
                 raise ValueError(SECRET_ERROR + name)
             # Every newly cited source must resolve to a verified raw record (#33, #36).
-            added = set(REF_LIKE.findall(content)) - set(REF_LIKE.findall(old.get(name, '')))
+            added = note_source_refs(content) - note_source_refs(old.get(name, ''))
             if added:
                 check_sources(sorted(added), sources or default_sources(root, scope))
         final[name] = content
@@ -491,11 +491,16 @@ def remember(root, subject, key, value, why, scope='project', kind=None, roots=N
     return result
 
 
-SOURCE_REF = re.compile(r'(?:local|[0-9a-f]{16}):\d+:[0-9a-f]{12}')
 # Anything shaped like a reference, including too-long or too-short parts (#35); the ledger's
 # `source` parser then decides, so remember/apply and `source --ref` agree on what is valid.
 REF_LIKE = re.compile(r'(?<![0-9A-Za-z_])(?:local|[0-9a-f]{8,32}):\d+:[0-9a-f]{6,}(?![0-9A-Za-z_])')
 WHY_LINE = re.compile(r'^Why: .*$', re.M)
+
+
+def note_source_refs(content):
+    # Keep inline code citations; skip literal blocks and comments using the note parser (#42).
+    active = storelib.doctor._active_markdown(content, keep_inline=True)
+    return set(REF_LIKE.findall(active))
 
 
 def default_sources(root, scope):
@@ -525,13 +530,13 @@ def upgrade_sources(root, data, names, why, scope, roots=None):
     are left untouched (idempotent). New references are verified against the raw ledger first
     (#33); notes holding several facts are never rewritten, so another fact's source is not lost
     (#34) - batch apply migrates those. Returns the apply result, or None when nothing changes."""
-    refs = REF_LIKE.findall(why)
+    refs = note_source_refs(why)
     if not refs:
         return None
     candidates = []
     for name in names:
         content = data[name]
-        if all(ref in content for ref in refs):
+        if refs <= note_source_refs(content):
             continue
         if len(WHY_LINE.findall(content)) != 1 or len(memory_facts.extract(content)[0]) != 1:
             continue  # Hand-written or multi-fact note: keep it; batch apply can migrate it.
