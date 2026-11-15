@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -83,8 +84,32 @@ def records(root):
 
 
 def verify(root):
-    """Recompute the hash chain. Any edited, removed or reordered record is reported."""
-    return verify_chain(records(root))
+    """Recompute the hash chain, check the consolidated-cursor checkpoint (#40) and every mirrored
+    document blob (#39). Any edited, removed, reordered or truncated record is reported."""
+    existing = verified_records(root)
+    documents = 0
+    for record in existing:
+        if record.get('kind') == 'document':
+            check_blob(root, record)
+            documents += 1
+    return dict(verify_chain(existing), documents=documents)
+
+
+def check_blob(root, record):
+    """A document record is only a source while its mirror still matches byte for byte (#39)."""
+    data = record.get('data') if isinstance(record.get('data'), dict) else {}
+    digest, size = data.get('sha256'), data.get('size')
+    label = 'Document mirror for seq ' + str(record.get('seq'))
+    if not isinstance(digest, str) or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest):
+        raise ValueError(label + ' has no valid sha256; it cannot be verified')
+    blobs = raw_root(root) / 'blobs'
+    blob = runtime.storelib.safe(blobs / digest, blobs)
+    if not blob.is_file():
+        raise ValueError(label + ' is missing; it cannot be verified')
+    content = blob.read_bytes()
+    if len(content) != size or hashlib.sha256(content).hexdigest() != digest:
+        raise ValueError(label + ' is corrupt (size or sha256 differs); do not quote it')
+    return blob
 
 
 def verify_chain(existing):
@@ -97,7 +122,15 @@ def verify_chain(existing):
     return {'records': count, 'head': previous}
 
 
-def _clip(value):
+# Structured fields whose values are credentials whatever they look like (#38).
+SENSITIVE_KEY = re.compile(r'password|passwd|passphrase|^pass$|^pwd$|secret|token|api[_-]?key|access[_-]?key|'
+                           r'private[_-]?key|credential|authorization|^auth$|cookie|session[_-]?key|'
+                           r'密碼|密码|口令|金鑰|金钥|密鑰|密钥|憑證|凭证|權杖|令牌', re.I)
+
+
+def _clip(value, sensitive=False):
+    if isinstance(value, str) and sensitive and value.strip():
+        return '[REDACTED]'
     if isinstance(value, str):
         value = memory_facts.redact(value)
         raw = value.encode('utf-8')
@@ -105,9 +138,9 @@ def _clip(value):
             return raw[:TEXT_CAP].decode('utf-8', 'ignore') + '…[truncated ' + str(len(raw)) + ' bytes]'
         return value
     if isinstance(value, dict):
-        return {str(k): _clip(v) for k, v in value.items()}
+        return {str(k): _clip(v, sensitive or bool(SENSITIVE_KEY.search(str(k)))) for k, v in value.items()}
     if isinstance(value, list):
-        return [_clip(v) for v in value]
+        return [_clip(v, sensitive) for v in value]
     return value
 
 
@@ -201,7 +234,10 @@ def source(roots, ref):
     record = existing[seq - 1]
     if not record['hash'].startswith(prefix):
         raise ValueError('Reference hash does not match the ledger record; the source changed or is wrong')
-    return {'ledger': str(root), 'record': record}
+    result = {'ledger': str(root), 'record': record}
+    if record.get('kind') == 'document':
+        result['blob'] = str(check_blob(root, record))
+    return result
 
 
 def search(root, text, limit=20):

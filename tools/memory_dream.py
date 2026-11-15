@@ -305,10 +305,10 @@ def main():
         upto = int(os.environ.get('JASON_DREAM_UPTO', '0'))
         if args.command == 'prompt':
             captured = []
-            consolidate(config, project, start, upto or 10 ** 9, dict(opts, dream_agent=['print']),
-                        lambda cmd, text: captured.append(text) or 0)
+            code = consolidate(config, project, start, upto or 10 ** 9, dict(opts, dream_agent=['print']),
+                               lambda cmd, text: captured.append(text) or 0)
             sys.stdout.write('\n'.join(captured))
-            return 0
+            return code  # A broken or truncated ledger is an error, not an empty prompt (#40).
         return consolidate(config, project, start, upto, opts)
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         runtime.emit_json({'error': str(exc)}, sys.stderr)

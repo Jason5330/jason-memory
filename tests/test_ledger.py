@@ -1,6 +1,7 @@
 """Regression tests for issues #1-#10: raw ledger, mirror, dreaming, recall cost and hook attribution."""
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -722,6 +723,128 @@ class SourceUpgradeTests(Base):
             self.assertNotIn('source_upgraded', result)
             self.assertEqual((self.root / name).read_bytes(), before)
             self.assertIn(time_ref, (self.root / name).read_text(encoding='utf-8'))
+
+    def test_overlong_or_short_reference_is_refused_like_source_ref(self):
+        """#35: a 13- or 11-character hash is not a valid reference; it never replaces a source."""
+        first, second = self.refs('時間用 24 小時制', '再確認一次 24 小時制')
+        with runtime.opened(self.config):
+            saved = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger ' + first)
+            path = Path(saved['paths'][0])
+            before = path.read_bytes()
+            for bad in (second + 'f', second[:-1]):
+                with self.assertRaisesRegex(ValueError, 'does not resolve'):
+                    runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger ' + bad)
+                with self.assertRaises(ValueError):
+                    ledger.source({'project': self.root}, bad)
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_new_note_and_apply_cannot_publish_an_unresolvable_source(self):
+        """#36: first-time remember and apply verify newly cited references too."""
+        good, = self.refs('日期用 ISO')
+        bad = good[:-1] + ('0' if good[-1] != '0' else '1')
+        with runtime.opened(self.config):
+            with self.assertRaisesRegex(ValueError, 'does not resolve'):
+                runtime.remember(self.root, 'qa', 'new-invalid-ref', 'ISO', '來源：ledger ' + bad)
+            self.assertFalse(any('ISO' in text for text in runtime.notes(self.root).values()))
+            saved = runtime.remember(self.root, 'qa', 'apply-invalid-ref', 'ISO', '來源：ledger ' + good)
+            name = Path(saved['paths'][0]).relative_to(self.root).as_posix()
+            before = (self.root / name).read_bytes()
+            content = runtime.notes(self.root)[name].replace(good, bad)
+            with self.assertRaisesRegex(ValueError, 'does not resolve'):
+                runtime.apply(self.root, {'expected_revision': runtime.revision(self.root),
+                                          'updates': {name: content}, 'retire': []})
+            self.assertEqual((self.root / name).read_bytes(), before)
+            # Unchanged references in an edited note are not re-checked, valid ones still pass.
+            edited = runtime.notes(self.root)[name].replace('\n\nWhy: ', '\n\n已確認。\n\nWhy: ', 1)
+            self.assertTrue(runtime.apply(self.root, {'expected_revision': runtime.revision(self.root),
+                                                      'updates': {name: edited}, 'retire': []})['changed'])
+
+
+class IntegrityTests(Base):
+    ledger_cfg = {'enabled': True, 'dream_every': 1000}
+
+    def cli(self, script, *args):
+        return subprocess.run([sys.executable, str(ROOT / 'tools' / script), '--config', str(self.config), *args],
+                              capture_output=True, text=True, encoding='utf-8', timeout=60)
+
+    def test_structured_credential_fields_are_redacted_before_the_ledger(self):
+        """#38: a credential under a sensitive key is masked whatever the value looks like."""
+        value = 'QA_ONLY_value_7'
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'tool', {'input': {'command': 'login password=' + value},
+                                              'result': {'password': value, 'nested': {'api_key': value},
+                                                         'tokens': [value], 'input_tokens': 12, 'note': 'ok'}})
+            record = ledger.replay(self.root)[-1]
+        text = json.dumps(record, ensure_ascii=False)
+        self.assertNotIn(value, text)
+        self.assertEqual(record['data']['result']['password'], '[REDACTED]')
+        self.assertEqual(record['data']['result']['nested']['api_key'], '[REDACTED]')
+        self.assertEqual(record['data']['result']['input_tokens'], 12)
+        self.assertEqual(record['data']['result']['note'], 'ok')
+        self.assertNotIn(value, (ledger.raw_root(self.root) / 'ledger.jsonl').read_text(encoding='utf-8'))
+
+    def test_corrupt_document_mirror_fails_verify_and_source(self):
+        """#39: a mirrored blob whose bytes changed is reported, not served as the exact text."""
+        document = self.project / 'terms.txt'
+        document.write_bytes(b'Clause 7: refunds within 14 days.\n')
+        with runtime.opened(self.config):
+            mirrored = ledger.mirror(self.root, document)
+            ref = ledger.reference('local', ledger.replay(self.root)[-1])
+            self.assertTrue(ledger.source({'project': self.root}, ref)['blob'])
+        self.assertEqual(self.cli('memory_ledger.py', 'verify').returncode, 0)
+        blob = Path(mirrored['blob'])
+        data = bytearray(blob.read_bytes())
+        data[-1] ^= 1
+        blob.write_bytes(bytes(data))
+        verify = self.cli('memory_ledger.py', 'verify')
+        self.assertEqual(verify.returncode, 1, verify.stdout)
+        self.assertIn('corrupt', verify.stderr)
+        found = self.cli('memory_ledger.py', 'source', '--ref', ref)
+        self.assertEqual(found.returncode, 1, found.stdout)
+        blob.unlink()
+        self.assertIn('missing', self.cli('memory_ledger.py', 'verify').stderr)
+
+    def test_truncated_consolidated_ledger_fails_verify_and_prompt(self):
+        """#40: verify and prompt exit non-zero when the ledger lost records below the cursor."""
+        with runtime.opened(self.config):
+            for text in ('一', '二', '三'):
+                ledger.append(self.root, 'prompt', {'text': text})
+            owner = ledger.claim_job(self.root, 'dream', 3)
+            self.assertTrue(ledger.release_job(self.root, owner, 3))
+        self.assertEqual(self.cli('memory_ledger.py', 'verify').returncode, 0)
+        self.assertEqual(self.cli('memory_dream.py', 'prompt').returncode, 0)
+        path = ledger.raw_root(self.root) / 'ledger.jsonl'
+        lines = path.read_bytes().splitlines(keepends=True)
+        path.write_bytes(b''.join(lines[:-1]))
+        verify = self.cli('memory_ledger.py', 'verify')
+        self.assertEqual(verify.returncode, 1, verify.stdout)
+        self.assertIn('truncated', verify.stderr)
+        prompt = self.cli('memory_dream.py', 'prompt')
+        self.assertNotEqual(prompt.returncode, 0)
+        self.assertEqual(prompt.stdout, '')
+        self.assertEqual(self.cli('memory_ledger.py', 'replay').returncode, 1)
+
+    def test_codex_notify_skips_a_redelivered_turn_but_keeps_new_turns(self):
+        """#37: the same turn-id delivered again adds nothing; an interrupted delivery is completed."""
+        import codex_notify
+        payload = {'type': 'agent-turn-complete', 'thread-id': 'matrix-codex', 'turn-id': 'matrix-turn-1',
+                   'cwd': str(self.project), 'input-messages': ['提示'], 'last-assistant-message': '回覆'}
+        codex_notify.handle(payload)
+        codex_notify.handle(dict(payload))
+        codex_notify.handle(dict(payload, **{'turn-id': 'matrix-turn-2'}))
+        with runtime.opened(self.config):
+            events = ledger.replay(self.root, 'matrix-codex')
+        self.assertEqual([(r['kind'], r['data']['turn']) for r in events],
+                         [('prompt', 'matrix-turn-1'), ('assistant', 'matrix-turn-1'),
+                          ('prompt', 'matrix-turn-2'), ('assistant', 'matrix-turn-2')])
+        # Interrupted between prompt and reply: a retry records only the missing reply.
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'prompt', {'text': '提示', 'host': 'codex', 'turn': 'matrix-turn-3',
+                                                'part': 0}, 'matrix-codex')
+        codex_notify.handle(dict(payload, **{'turn-id': 'matrix-turn-3'}))
+        with runtime.opened(self.config):
+            third = [r['kind'] for r in ledger.replay(self.root, 'matrix-codex') if r['data']['turn'] == 'matrix-turn-3']
+        self.assertEqual(third, ['prompt', 'assistant'])
 
 
 class ExportTests(Base):

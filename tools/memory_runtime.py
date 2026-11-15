@@ -247,7 +247,7 @@ def commit_global_rebuild(home, roots, plans):
     """Publish both prepared scopes as one recoverable operation under the shared writer lock."""
     transactions = {}
     for scope, plan in plans.items():
-        tx, _, _, changed, index_changed = prepare_apply(roots[scope], plan, scope)
+        tx, _, _, changed, index_changed = prepare_apply(roots[scope], plan, scope, roots)
         if changed or index_changed:
             transactions[scope] = tx
     if transactions:
@@ -355,7 +355,7 @@ def verify(root, names):
             'contents': {name: path.read_text(encoding='utf-8-sig') for name, path in zip(names, paths)}, **evidence}
 
 
-def prepare_apply(root, plan, scope):
+def prepare_apply(root, plan, scope, sources=None):
     if not isinstance(plan, dict) or set(plan) != {'expected_revision', 'updates', 'retire'}:
         raise ValueError('Plan needs expected_revision, updates (path: content), retire (paths)')
     old = notes(root)
@@ -382,6 +382,10 @@ def prepare_apply(root, plan, scope):
             leaked = memory_facts.secret_values(content)
             if leaked:
                 raise ValueError(SECRET_ERROR + name)
+            # Every newly cited source must resolve to a verified raw record (#33, #36).
+            added = set(REF_LIKE.findall(content)) - set(REF_LIKE.findall(old.get(name, '')))
+            if added:
+                check_sources(sorted(added), sources or default_sources(root, scope))
         final[name] = content
     # Updating a mixed note must not silently drop an unrelated identified fact.
     retained_keys = {(s, p) for content in final.values() for s, p, _ in memory_facts.extract(content)[0]}
@@ -408,8 +412,8 @@ def prepare_apply(root, plan, scope):
     return tx, checks, facts, changed, index_changed
 
 
-def apply(root, plan, scope='project'):
-    tx, checks, facts, changed, index_changed = prepare_apply(root, plan, scope)
+def apply(root, plan, scope='project', sources=None):
+    tx, checks, facts, changed, index_changed = prepare_apply(root, plan, scope, sources)
     final, index = tx['notes'], tx['index']
     if changed or index_changed:
         storelib.atomic_write(root / '.transaction.json', json.dumps(tx, ensure_ascii=False))
@@ -482,17 +486,30 @@ def remember(root, subject, key, value, why, scope='project', kind=None, roots=N
     index = read_index(root)
     plan = {'expected_revision': revision_for(data, index), 'updates': {name: content},
             'retire': sorted(set(retype) - {name})}
-    result = apply(root, plan, scope)
+    result = apply(root, plan, scope, roots)
     result['saved_fact'] = {'subject': subject, 'predicate': key, 'value': value, 'type': kind}
     return result
 
 
 SOURCE_REF = re.compile(r'(?:local|[0-9a-f]{16}):\d+:[0-9a-f]{12}')
+# Anything shaped like a reference, including too-long or too-short parts (#35); the ledger's
+# `source` parser then decides, so remember/apply and `source --ref` agree on what is valid.
+REF_LIKE = re.compile(r'(?<![0-9A-Za-z_])(?:local|[0-9a-f]{8,32}):\d+:[0-9a-f]{6,}(?![0-9A-Za-z_])')
 WHY_LINE = re.compile(r'^Why: .*$', re.M)
 
 
+def default_sources(root, scope):
+    """Stores a reference may point into when the caller did not pass the opened roots."""
+    root = Path(root)
+    if scope == 'global':
+        return {'global': root}
+    if root.parent.name == 'projects' and (root.parent.parent / 'shared').is_dir():
+        return {'global': root.parent.parent / 'shared', 'project': root}  # Global edition.
+    return {'project': root}
+
+
 def check_sources(refs, roots):
-    """Every new reference must resolve to a verified raw record before it replaces a source (#33)."""
+    """Every new reference must resolve to a verified raw record before it is published (#33, #36)."""
     import memory_ledger  # Lazy: memory_ledger imports this module.
     for ref in refs:
         try:
@@ -508,7 +525,7 @@ def upgrade_sources(root, data, names, why, scope, roots=None):
     are left untouched (idempotent). New references are verified against the raw ledger first
     (#33); notes holding several facts are never rewritten, so another fact's source is not lost
     (#34) - batch apply migrates those. Returns the apply result, or None when nothing changes."""
-    refs = SOURCE_REF.findall(why)
+    refs = REF_LIKE.findall(why)
     if not refs:
         return None
     candidates = []
@@ -521,7 +538,6 @@ def upgrade_sources(root, data, names, why, scope, roots=None):
         candidates.append(name)
     if not candidates:
         return None
-    check_sources(refs, roots or {'global' if scope == 'global' else 'project': root})
     updates = {}
     for name in candidates:
         content = data[name]
@@ -531,7 +547,7 @@ def upgrade_sources(root, data, names, why, scope, roots=None):
     if not updates:
         return None
     result = apply(root, {'expected_revision': revision_for(data, read_index(root)),
-                          'updates': updates, 'retire': []}, scope)
+                          'updates': updates, 'retire': []}, scope, roots)  # apply verifies sources.
     result['source_upgraded'] = sorted(updates)
     return result
 
@@ -600,6 +616,13 @@ def read_notes(root, names, budget=MAX_BYTES):
     return {'root': str(root), 'contents': contents, 'bytes': used}
 
 
+def source_roots(cfg, project, roots):
+    """Rebuild staging writes to an empty copy; references are verified against the real ledgers."""
+    if cfg.get('source_config'):
+        return configuration(cfg['source_config'], project)[3]
+    return roots
+
+
 def emit_json(result, stream=None):
     stream = stream or sys.stdout
     raw = json.dumps(result, ensure_ascii=False) + '\n'
@@ -640,13 +663,11 @@ def main():
                     plan = json.loads(raw.decode('utf-8-sig'))
                 else:
                     plan = read_json(args.plan)
-                result = apply(roots[args.scope], plan, args.scope)
+                result = apply(roots[args.scope], plan, args.scope, source_roots(cfg, project, roots))
             elif args.command == 'remember':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')
-                sources = roots
-                if cfg.get('source_config'):  # Rebuild staging: verify against the real ledgers.
-                    sources = configuration(cfg['source_config'], project)[3]
+                sources = source_roots(cfg, project, roots)
                 result = remember(roots[args.scope], args.subject, args.key, args.value, args.why, args.scope, args.kind,
                                   sources)
             elif args.command == 'verify':

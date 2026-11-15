@@ -32,7 +32,10 @@ JSON 與算 SHA-256，就能重播並驗證它；不需要本專案的程式碼�
 任何修改、刪除、插入或重排都會在第一筆不符處失敗。
 
 `document` 紀錄的 `data` 為 `{"path", "sha256", "size"}`；`blobs/<sha256>` 的內容重算
-SHA-256 必須等於檔名。
+SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --ref` 都會檢查，鏡像遺失或損壞即失敗（#39）。
+
+寫入前的遮蔽：字串裡看起來像憑證的值，以及鍵名為 password、token、api_key、secret、cookie、
+authorization 等欄位下的字串值，一律改為 `[REDACTED]`（#38）。
 
 ## 各 kind 的 data
 

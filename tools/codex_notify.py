@@ -53,12 +53,29 @@ def handle(payload, cwd=None):
     if not opts['enabled']:
         return None
     session = str(payload.get('thread-id') or payload.get('turn-id') or '')
+    turn = str(payload.get('turn-id') or '')
     with runtime.opened(config, project) as (_, project, roots):
         root = roots['project']
-        for message in payload.get('input-messages') or []:
-            ledger.append(root, 'prompt', {'text': str(message), 'host': 'codex'}, session)
-        ledger.append(root, 'assistant', {'text': str(payload.get('last-assistant-message') or ''),
-                                          'host': 'codex'}, session)
+        # Codex may deliver the same turn again (#37): parts already recorded for this stable
+        # turn-id are skipped, so a retry after an interrupted delivery only adds what is missing.
+        seen = set()
+        if turn:
+            seen = {(r.get('kind'), r['data'].get('part')) for r in ledger.records(root)
+                    if r.get('session') == session and isinstance(r.get('data'), dict)
+                    and r['data'].get('turn') == turn}
+        events = [('prompt', index, str(message)) for index, message in enumerate(payload.get('input-messages') or [])]
+        events.append(('assistant', 0, str(payload.get('last-assistant-message') or '')))
+        added = 0
+        for kind, part, text in events:
+            if (kind, part) in seen:
+                continue
+            data = {'text': text, 'host': 'codex'}
+            if turn:
+                data.update(turn=turn, part=part)
+            ledger.append(root, kind, data, session)
+            added += 1
+        if not added:
+            return None
         return ledger.maybe_dream(root, config, project, opts)
 
 

@@ -191,7 +191,10 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   在結果中回報，找不到 Codex 設定資料夾時略過。`INSTALL.cmd --uninstall` 兩邊一起移除，`--agent claude|codex` 只裝其一。
   前台模型只收到「不要寫記憶、不要說已記住」的指示；說了「已記住」會被 Stop hook 要求更正。
 - **帳本** `.jason-memory/.raw/ledger.jsonl`：只用 O_APPEND 追加，雜湊鏈防竄改，格式見
-  [帳本格式](ledger-format.md)。`memory_ledger.py verify` 重算雜湊鏈；憑證值寫入前遮蔽為 `[REDACTED]`。
+  [帳本格式](ledger-format.md)。`memory_ledger.py verify` 重算雜湊鏈、比對已整理游標的 checkpoint，並核對每份文件鏡像，
+  任一不符就以非 0 結束（#39、#40）；`memory_dream.py prompt` 遇到帳本損壞也以非 0 結束。
+  憑證值（含結構化結果中 password、token 等欄位的值）寫入前遮蔽為 `[REDACTED]`（#38）。
+  Codex notify 以 turn-id 去重：同一個 turn 重送不會重複記錄，中斷後重送只補缺少的部分（#37）。
 - **重播／精確查詢**：`replay [--session ID]` 按原順序取回事件；`search --text 原文`
   找確切句子、數字或錯誤訊息。兩個指令都先驗證帳本與已整理游標的 checkpoint。
 - **文件鏡像**：`mirror --file 路徑` 把文件逐位元組存到 `.raw/blobs/<sha256>`，
@@ -205,7 +208,8 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   舊筆記只寫「ledger seq N」時，背景整理或 `rebuild` 以完整編號重送同一事實，`remember` 只更新該筆記的
   `Why` 行（#32）；已含相同編號則不改檔。改寫前會先用原始帳本驗證新編號，查不到或雜湊不符就報錯、
   保留原來源（#33；重建時驗證的是真正的帳本，不是暫存區）。一則筆記含多個事實時不自動改，
-  以免蓋掉其他事實的來源（#34），可用 `apply` 批次移轉。
+  以免蓋掉其他事實的來源（#34），可用 `apply` 批次移轉。首次 `remember` 與 `apply` 也會驗證新增的來源編號（#36）；
+  多一碼或少一碼的編號與 `source --ref` 一樣視為無效（#35）。
   Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
   成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error` 並於下次觸發重試；
   沒有新紀錄不重跑。`memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
