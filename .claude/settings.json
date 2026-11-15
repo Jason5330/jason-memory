@@ -46,6 +46,18 @@
         "matcher": "Bash|PowerShell|powershell"
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR}/tools/claude_memory_hook.py\" --config \"${CLAUDE_PROJECT_DIR}/.jason-memory.json\" --jason-hook",
+            "timeout": 15
+          }
+        ],
+        "matcher": "Bash|PowerShell|powershell"
+      }
+    ],
     "Stop": [
       {
         "hooks": [

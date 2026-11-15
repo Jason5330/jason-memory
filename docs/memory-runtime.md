@@ -196,7 +196,8 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   憑證值（含結構化結果中 password、token 等欄位的值）寫入前遮蔽為 `[REDACTED]`（#38）。
   Codex notify 以 turn-id 去重：同一個 turn 重送不會重複記錄，中斷後重送只補缺少的部分（#37）。
 - **重播／精確查詢**：`replay [--session ID]` 按原順序取回事件；`search --text 原文`
-  找確切句子、數字或錯誤訊息。兩個指令都先驗證帳本與已整理游標的 checkpoint。
+  以欄位的原始內容找確切句子、數字或錯誤訊息，包含原文的引號、換行與反斜線。
+  兩個指令都先驗證帳本與已整理游標的 checkpoint。
 - **文件鏡像**：`mirror --file 路徑` 把文件逐位元組存到 `.raw/blobs/<sha256>`，
   帳本記錄來源路徑、大小與指紋；同內容只存一份，不改動原件。
 - **背景整理（做夢）**：每次追加紀錄（提示、工具、回覆）後，未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作時，以分離程序啟動
@@ -212,7 +213,8 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   多一碼或少一碼的編號與 `source --ref` 一樣視為無效（#35）。正文和行內反引號中的引用都會檢查，
   Markdown 程式碼區塊與 HTML 註解中的格式範例可原樣保存（#42）。
   Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
-  成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error`。Codex 重送相同通知時，
+  完成後再次核對該批帳本，確認原紀錄仍可驗證才推進游標。失敗（含找不到 Agent CLI 127、未回報 ok 75）
+  記 `last_error`。Codex 重送相同通知時，
   已保存的事件會去重，只要待整理紀錄仍達門檻且沒有執行中的工作，就會重試（#41）。
   `memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。
 - **重建**：`python tools/memory_dream.py --config .jason-memory.json rebuild --yes` 先在
@@ -230,7 +232,7 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   偵測修改、刪除、重排與游標以下的截斷；不通過就不交給模型、不推進游標（代碼 65）。
   帳本尾端尚未整理部分的截斷，仍需外部備份才能察覺。
 
-限制：Claude hook 只對 Shell 類工具記錄 PostToolUse；其他工具的結果只透過助理回覆間接保留。
+Claude hook 對 Shell 類工具記錄 `PostToolUse` 與 `PostToolUseFailure`。其他工具的結果可透過助理回覆間接保留。
 背景整理品質取決於所用的模型與權限（`claude -p` 只允許執行 python 與讀檔）；本框架負責觸發、
 範圍、游標、重試與寫入權限。整理完成前，新偏好只在當前對話中有效。
 

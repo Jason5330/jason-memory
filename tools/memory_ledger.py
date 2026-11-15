@@ -77,9 +77,12 @@ def records(root):
             if not line.strip():
                 continue
             try:
-                result.append(json.loads(line.decode('utf-8')))
+                record = json.loads(line.decode('utf-8'))
             except ValueError:
                 raise ValueError('Ledger line ' + str(number) + ' is not valid JSON')
+            if not isinstance(record, dict):
+                raise ValueError('Ledger line ' + str(number) + ' is not a record object')
+            result.append(record)
     return result
 
 
@@ -165,9 +168,17 @@ def append(root, kind, data, session=''):
     record['hash'] = _hash(record)
     line = (json.dumps(record, ensure_ascii=False, sort_keys=True) + '\n').encode('utf-8')
     # O_APPEND: existing bytes are never rewritten.
-    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, 'O_BINARY', 0), 0o600)
+    fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_APPEND | getattr(os, 'O_BINARY', 0), 0o600)
     try:
-        os.write(fd, line)
+        size = os.lseek(fd, 0, os.SEEK_END)
+        if size:
+            os.lseek(fd, -1, os.SEEK_END)
+            if os.read(fd, 1) != b'\n':
+                line = b'\n' + line
+        if os.write(fd, line) != len(line):
+            os.ftruncate(fd, size)
+            os.fsync(fd)
+            raise OSError('Incomplete ledger append; previous records kept')
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -249,10 +260,23 @@ def source(roots, ref):
     return result
 
 
+def _searchable_text(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield key
+            yield from _searchable_text(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _searchable_text(child)
+    else:
+        yield value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+
+
 def search(root, text, limit=20):
     """Exact-text lookup in the raw layer when a precise quote, number or error is needed."""
     needle = text.casefold()
-    hits = [r for r in verified_records(root) if needle in json.dumps(r['data'], ensure_ascii=False).casefold()]
+    hits = [r for r in verified_records(root)
+            if not needle or any(needle in field.casefold() for field in _searchable_text(r['data']))]
     return hits[-limit:]
 
 
@@ -417,10 +441,11 @@ def dream_run(config, project, upto, opts, owner=None):
         start = dream_state(root)['cursor']
         try:
             existing = verified_records(root)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             release_job(root, owner, upto, {'code': 65, 'error': str(exc)})
             return 65
         upto = min(upto, len(existing))
+        target_hash = existing[upto - 1]['hash'] if upto > start else None
     env = dict(os.environ, JASON_DREAM='1', JASON_MEMORY_CONFIG=str(config), JASON_MEMORY_PROJECT=str(project),
                JASON_DREAM_FROM=str(start + 1), JASON_DREAM_UPTO=str(upto), JASON_MEMORY_ROOT=str(root))
     error = None
@@ -435,6 +460,13 @@ def dream_run(config, project, upto, opts, owner=None):
     else:
         code = 0
     with runtime.opened(config, project) as (_, _, roots):
+        if code == 0 and target_hash is not None:
+            try:
+                current = verified_records(root)
+                if len(current) < upto or current[upto - 1]['hash'] != target_hash:
+                    raise ValueError('Ledger changed during background consolidation')
+            except (OSError, ValueError) as exc:
+                code, error = 65, str(exc)
         finished = release_job(root, owner, upto, None if code == 0 else {'code': code, 'error': error or 'exit code'})
         if finished and code == 0:
             # Records that arrived while this worker was busy start the next run now, instead of

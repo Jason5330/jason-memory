@@ -59,6 +59,7 @@ class GlobalInstallTests(unittest.TestCase):
         data = json.loads(once)
         self.assertEqual(len(data['hooks']['Stop']), 2)
         self.assertEqual(len(data['hooks']['SessionStart']), 1)
+        self.assertEqual(data['hooks']['PostToolUseFailure'][0]['matcher'], 'Bash|PowerShell|powershell')
         self.run_install()
         self.assertEqual(target.read_bytes(), once)
         self.run_install('--uninstall')
