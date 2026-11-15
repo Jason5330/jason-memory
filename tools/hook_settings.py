@@ -2,7 +2,8 @@
 import copy
 import json
 
-EVENTS = ('SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop')
+TOOL_EVENTS = ('PostToolUse', 'PostToolUseFailure')
+EVENTS = ('SessionStart', 'UserPromptSubmit', 'PreToolUse', *TOOL_EVENTS, 'Stop')
 MARKER = '--jason-hook'
 
 
@@ -29,7 +30,7 @@ def merged(original, command=None):
             group = {'hooks': [{'type': 'command', 'command': command, 'timeout': 15}]}
             if name == 'PreToolUse':
                 group['matcher'] = 'Read|Write|Edit|MultiEdit'
-            elif name == 'PostToolUse':
+            elif name in TOOL_EVENTS:
                 group['matcher'] = 'Bash|PowerShell|powershell'
             retained.append(group)
         if retained:

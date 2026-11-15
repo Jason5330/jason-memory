@@ -13,8 +13,8 @@ from urllib.parse import unquote
 
 import memory_runtime as runtime
 import memory_ledger as ledger
+from hook_settings import EVENTS, TOOL_EVENTS
 
-EVENTS = ('SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop')
 LIMIT = 8000  # Characters; stay below Claude's large additionalContext file-fallback threshold.
 INDEX_SHARE = 2500  # Characters of index rows per store.
 
@@ -287,11 +287,15 @@ def handle(event, config):
         return {}  # The background consolidation worker is not a user conversation.
     if name not in EVENTS:
         return {}
-    if name == 'PostToolUse':
-        output = event.get('tool_response', {})
-        failed = isinstance(output, dict) and (output.get('interrupted') or output.get('isError') or
-                  output.get('exitCode', output.get('exit_code', 0)) not in (0, None))
-        handles = tool_receipts(output)
+    if name in TOOL_EVENTS:
+        if name == 'PostToolUseFailure':
+            output = {'error': event.get('error', ''), 'is_interrupt': bool(event.get('is_interrupt'))}
+            failed = True
+        else:
+            output = event.get('tool_response', {})
+            failed = isinstance(output, dict) and (output.get('interrupted') or output.get('isError') or
+                      output.get('exitCode', output.get('exit_code', 0)) not in (0, None))
+        handles = [] if failed else tool_receipts(output)
         record_tool = ledger_settings(config)['enabled']
         if (failed or event.get('tool_name') not in ('Bash', 'PowerShell', 'powershell') or not handles) and not record_tool:
             return {}  # Stop still audits the store; ordinary tools need no full-store pass.
@@ -336,7 +340,7 @@ def handle(event, config):
         state_root.mkdir(exist_ok=True)
         state_path = runtime.storelib.safe(state_root / (session + '.json'), state_root)
         state = runtime.read_json(state_path) if state_path.exists() else {}
-        if name == 'PostToolUse':
+        if name in TOOL_EVENTS:
             if record_tool:
                 ledger.append(roots['project'], 'tool', {'tool': event.get('tool_name', ''),
                               'input': event.get('tool_input'), 'result': output}, event.get('session_id', ''))

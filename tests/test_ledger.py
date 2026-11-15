@@ -617,6 +617,70 @@ class BackgroundModeTests(Base):
             hits = ledger.search(self.root, 'E-4096-XY')
         self.assertEqual(hits[0]['data']['text'], '錯誤碼是 E-4096-XY，報價 12,345.67 元')
 
+    def test_search_matches_original_nested_text_and_not_json_escapes(self):
+        literals = ['QA-QUOTE expected "ready"', 'QA-LINES line one\nline two', r'QA-PATH C:\build\run.log']
+        with runtime.opened(self.config):
+            record = ledger.append(self.root, 'tool', {'nested': [{'stdout': '\n'.join(literals), 'exit_code': 73}]})
+            for text in literals + ['EXIT_CODE', '73']:
+                with self.subTest(text=text):
+                    self.assertEqual(ledger.search(self.root, text), [record])
+            self.assertEqual(ledger.search(self.root, r'line one\nline two'), [])
+
+    def test_append_after_complete_final_record_without_a_newline(self):
+        with runtime.opened(self.config):
+            first = ledger.append(self.root, 'prompt', {'text': 'first'})
+            path = ledger.raw_root(self.root) / ledger.LEDGER
+            original = path.read_bytes()
+            path.write_bytes(original[:-1])
+            self.assertEqual(ledger.verify(self.root)['head'], first['hash'])
+            second = ledger.append(self.root, 'assistant', {'text': 'second'})
+            self.assertEqual(ledger.replay(self.root), [first, second])
+            self.assertEqual(ledger.verify(self.root)['head'], second['hash'])
+            self.assertTrue(path.read_bytes().startswith(original))
+
+    def test_short_append_preserves_retryable_record_boundary(self):
+        from unittest.mock import patch
+        with runtime.opened(self.config):
+            first = ledger.append(self.root, 'prompt', {'text': 'first'})
+            path = ledger.raw_root(self.root) / ledger.LEDGER
+            original = path.read_bytes()[:-1]
+            path.write_bytes(original)
+            write = ledger.os.write
+            with patch.object(ledger.os, 'write', side_effect=lambda fd, data: write(fd, data[:10])):
+                with self.assertRaisesRegex(OSError, 'Incomplete ledger append'):
+                    ledger.append(self.root, 'assistant', {'text': 'second'})
+            self.assertEqual(path.read_bytes(), original)
+            second = ledger.append(self.root, 'assistant', {'text': 'second'})
+            self.assertEqual(ledger.replay(self.root), [first, second])
+
+    def test_dream_rejects_ledger_truncation_during_worker_execution(self):
+        from unittest.mock import patch
+        with runtime.opened(self.config):
+            ledger.append(self.root, 'prompt', {'text': 'first'})
+            ledger.append(self.root, 'prompt', {'text': 'second'})
+        path = ledger.raw_root(self.root) / ledger.LEDGER
+        first_line, second_line = path.read_bytes().splitlines(keepends=True)
+
+        opts = ledger.settings(self.config)
+        for tail in (b'', b'{', b'null\n'):
+            with self.subTest(tail=tail):
+                path.write_bytes(first_line + second_line)
+
+                def complete_after_truncation(*args, **kwargs):
+                    path.write_bytes(first_line + tail)
+                    return 0
+
+                with patch.object(ledger.subprocess, 'call', side_effect=complete_after_truncation):
+                    self.assertEqual(ledger.dream_run(self.config, self.project, 2, opts), 65)
+                with runtime.opened(self.config):
+                    state = ledger.dream_state(self.root)
+                    self.assertEqual((state['cursor'], state.get('running'), state['last_error']['code']), (0, None, 65))
+        path.write_bytes(first_line + second_line)
+        with patch.object(ledger.subprocess, 'call', return_value=0):
+            self.assertEqual(ledger.dream_run(self.config, self.project, 2, opts), 0)
+        with runtime.opened(self.config):
+            self.assertEqual(ledger.pending(self.root)['cursor'], 2)
+
     def test_exact_lookup_rejects_tampered_records(self):
         self.event('UserPromptSubmit', prompt='報價 12,345.6700 元')
         path = self.root / '.raw/ledger.jsonl'
@@ -636,6 +700,21 @@ class BackgroundModeTests(Base):
         self.assertIn('QA-EVIDENCE-7B9A amount 12,345.6700', prompts[0])
         line = next(line for line in prompts[0].splitlines() if line.startswith('[ref local:1:'))
         self.assertLessEqual(len(line), dream.RECORD_CAP)
+
+    def test_tool_failure_reaches_ledger_and_background_prompt(self):
+        import memory_dream as dream
+        command = {'command': 'exit 73'}
+        error = 'Exit code 73\nQA-FAILED-STATE-73'
+        self.assertEqual(self.event('PostToolUseFailure', tool_name='Bash', tool_input=command,
+                                    error=error, is_interrupt=False), {})
+        with runtime.opened(self.config):
+            records = ledger.replay(self.root, 'A')
+        self.assertEqual([(r['kind'], r['data']) for r in records], [
+            ('tool', {'tool': 'Bash', 'input': command, 'result': {'error': error, 'is_interrupt': False}})])
+        prompts = []
+        self.assertEqual(dream.consolidate(self.config, self.project, 1, 1, ledger.settings(self.config),
+                                          lambda cmd, text: prompts.append(text) or 0), 0)
+        self.assertIn('QA-FAILED-STATE-73', prompts[0])
 
     def test_independent_reader_verifies_ledger_format(self):
         """Spec in docs/ledger-format.md, reimplemented with json + hashlib only."""

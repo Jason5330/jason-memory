@@ -30,6 +30,7 @@ JSON 與算 SHA-256，就能重播並驗證它；不需要本專案的程式碼�
 
 依序讀每一行：`seq` 等於行號、`prev` 等於前一筆 `hash`、重算的 `hash` 與欄位相符。
 任何修改、刪除、插入或重排都會在第一筆不符處失敗。
+如果最後一筆 JSON 完整、只缺行尾換行，下次追加會補上分隔字元，保留原紀錄與雜湊。
 
 `document` 紀錄的 `data` 為 `{"path", "sha256", "size"}`；`blobs/<sha256>` 的內容重算
 SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --ref` 都會檢查，鏡像遺失或損壞即失敗（#39）。
@@ -44,7 +45,7 @@ SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --
 |---|---|
 | `prompt` | `{"text": 使用者訊息, "host"?: "codex"}` |
 | `assistant` | `{"text": 最終回覆, "stop_hook_active"?: bool, "host"?: "codex"}` |
-| `tool` | `{"tool": 名稱, "input": 參數, "result": 輸出}`（Claude hook 目前只記錄 Shell 類工具） |
+| `tool` | `{"tool": 名稱, "input": 參數, "result": 輸出}`（Claude hook 記錄 Shell 成功及失敗結果，失敗輸出含 `error` 與 `is_interrupt`） |
 | `document` | `{"path": 原始路徑, "sha256": 指紋, "size": 位元組數}` |
 
 ## 來源編號
