@@ -670,20 +670,58 @@ class BackgroundModeTests(Base):
 
 
 class SourceUpgradeTests(Base):
+    def refs(self, *texts):
+        with runtime.opened(self.config):
+            return [ledger.reference('local', ledger.append(self.root, 'prompt', {'text': t})) for t in texts]
+
     def test_same_fact_with_full_reference_upgrades_once_then_is_idempotent(self):
         """#32: re-sending the same fact with a full source reference updates only the Why line."""
+        good, = self.refs('我習慣 24 小時制')
         with runtime.opened(self.config):
-            runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger seq 2')
-            upgraded = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger local:2:ab12cd34ef56')
+            runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger seq 1')
+            upgraded = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger ' + good)
             self.assertEqual(len(upgraded['source_upgraded']), 1)
             text = Path(upgraded['paths'][0]).read_text(encoding='utf-8')
-            self.assertIn('Why: 來源：ledger local:2:ab12cd34ef56', text)
-            self.assertNotIn('ledger seq 2', text)
+            self.assertIn('Why: 來源：ledger ' + good, text)
+            self.assertNotIn('ledger seq 1', text)
             self.assertIn('24 小時制', text)
-            again = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger local:2:ab12cd34ef56')
+            again = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger ' + good)
             self.assertFalse(again['changed'])
             plain = runtime.remember(self.root, 'user', 'clock', '24 小時制', '使用者再次確認')
             self.assertFalse(plain['changed'])
+
+    def test_unresolvable_reference_is_refused_and_keeps_the_verified_source(self):
+        """#33: a well-shaped reference with a wrong hash (or seq) never replaces a verified source."""
+        good, = self.refs('我習慣 24 小時制')
+        bad_hash = good[:-1] + ('0' if good[-1] != '0' else '1')
+        bad_seq = 'local:9:' + good.rsplit(':', 1)[1]
+        with runtime.opened(self.config):
+            saved = runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger ' + good)
+            path = Path(saved['paths'][0])
+            before = path.read_bytes()
+            for bad in (bad_hash, bad_seq):
+                with self.assertRaisesRegex(ValueError, 'does not resolve'):
+                    runtime.remember(self.root, 'user', 'clock', '24 小時制', '來源：ledger ' + bad)
+            self.assertEqual(path.read_bytes(), before)
+
+    def test_multi_fact_note_is_not_rewritten_by_one_fact_upgrade(self):
+        """#34: one Why line shared by two facts keeps both sources; apply migrates such notes."""
+        date_ref, time_ref = self.refs('日期用 ISO', '時間用 UTC')
+        with runtime.opened(self.config):
+            saved = runtime.remember(self.root, 'qa', 'multifact-date', 'ISO', '來源：ledger seq 1')
+            name = Path(saved['paths'][0]).relative_to(self.root).as_posix()
+            content = runtime.notes(self.root)[name]
+            content = content.replace('來源：ledger seq 1', '日期：ledger seq 1；時間：ledger ' + time_ref)
+            content = content.replace('"value": "ISO"}', '"value": "ISO"}, {"subject": "qa", "predicate": '
+                                      '"multifact-time", "value": "UTC"}')
+            runtime.apply(self.root, {'expected_revision': runtime.revision(self.root),
+                                      'updates': {name: content}, 'retire': []})
+            before = (self.root / name).read_bytes()
+            result = runtime.remember(self.root, 'qa', 'multifact-date', 'ISO', '來源：ledger ' + date_ref)
+            self.assertFalse(result['changed'])
+            self.assertNotIn('source_upgraded', result)
+            self.assertEqual((self.root / name).read_bytes(), before)
+            self.assertIn(time_ref, (self.root / name).read_text(encoding='utf-8'))
 
 
 class ExportTests(Base):

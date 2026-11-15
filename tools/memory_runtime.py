@@ -428,7 +428,7 @@ def apply(root, plan, scope='project'):
     return result
 
 
-def remember(root, subject, key, value, why, scope='project', kind=None):
+def remember(root, subject, key, value, why, scope='project', kind=None, roots=None):
     """Single-call add/verify. Corrections retain the explicit batch review path."""
     if not all(isinstance(v, str) and v.strip() for v in (subject, key, value, why)):
         raise ValueError('remember requires nonempty --subject, --key, --value and --why')
@@ -459,7 +459,7 @@ def remember(root, subject, key, value, why, scope='project', kind=None):
                 else:
                     matches.append(name)
     if matches and not retype:
-        upgraded = upgrade_sources(root, data, sorted(set(matches)), why, scope)
+        upgraded = upgrade_sources(root, data, sorted(set(matches)), why, scope, roots)
         if upgraded is not None:
             return upgraded
         return verify(root, sorted(set(matches)))
@@ -491,20 +491,40 @@ SOURCE_REF = re.compile(r'(?:local|[0-9a-f]{16}):\d+:[0-9a-f]{12}')
 WHY_LINE = re.compile(r'^Why: .*$', re.M)
 
 
-def upgrade_sources(root, data, names, why, scope):
+def check_sources(refs, roots):
+    """Every new reference must resolve to a verified raw record before it replaces a source (#33)."""
+    import memory_ledger  # Lazy: memory_ledger imports this module.
+    for ref in refs:
+        try:
+            memory_ledger.source(roots, ref)
+        except (OSError, ValueError) as error:
+            raise ValueError('Source reference does not resolve; the note keeps its current source: '
+                             + ref + ' (' + str(error) + ')')
+
+
+def upgrade_sources(root, data, names, why, scope, roots=None):
     """Same fact re-sent with a full source reference (#32): replace a legacy `ledger seq N` Why
     line so the note can be traced across projects. Notes that already cite every new reference
-    are left untouched (idempotent). Returns the apply result, or None when nothing changes."""
+    are left untouched (idempotent). New references are verified against the raw ledger first
+    (#33); notes holding several facts are never rewritten, so another fact's source is not lost
+    (#34) - batch apply migrates those. Returns the apply result, or None when nothing changes."""
     refs = SOURCE_REF.findall(why)
     if not refs:
         return None
-    updates = {}
+    candidates = []
     for name in names:
         content = data[name]
         if all(ref in content for ref in refs):
             continue
-        if len(WHY_LINE.findall(content)) != 1:
+        if len(WHY_LINE.findall(content)) != 1 or len(memory_facts.extract(content)[0]) != 1:
             continue  # Hand-written or multi-fact note: keep it; batch apply can migrate it.
+        candidates.append(name)
+    if not candidates:
+        return None
+    check_sources(refs, roots or {'global' if scope == 'global' else 'project': root})
+    updates = {}
+    for name in candidates:
+        content = data[name]
         updated = WHY_LINE.sub(lambda _: 'Why: ' + why, content, count=1)
         updated = re.sub(r'^updated: .*$', 'updated: ' + date.today().isoformat(), updated, count=1, flags=re.M)
         updates[name] = updated
@@ -624,7 +644,11 @@ def main():
             elif args.command == 'remember':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')
-                result = remember(roots[args.scope], args.subject, args.key, args.value, args.why, args.scope, args.kind)
+                sources = roots
+                if cfg.get('source_config'):  # Rebuild staging: verify against the real ledgers.
+                    sources = configuration(cfg['source_config'], project)[3]
+                result = remember(roots[args.scope], args.subject, args.key, args.value, args.why, args.scope, args.kind,
+                                  sources)
             elif args.command == 'verify':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')

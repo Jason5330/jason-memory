@@ -215,6 +215,8 @@ def rebuild(config, project, opts, runner=None):
             created_staging = True
             staging_config = staging / '.jason-memory.json'
             settings = {'mode': 'global', 'home': '.'} if global_mode else {'mode': 'project', 'memory_root': 'store'}
+            # Source references cite the real ledgers, not the empty staged ones (#33).
+            settings['source_config'] = str(Path(config).resolve())
             staging_config.write_text(json.dumps(dict(settings, version=1)), encoding='utf-8')
             with runtime.opened(staging_config, project) as (_, _, staged):
                 if shared_notes:

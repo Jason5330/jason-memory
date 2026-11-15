@@ -197,6 +197,21 @@ print('JASON_DREAM_STATUS: ok')
         self.assertNotIn('來源：ledger seq 1', shared)
         found = json.loads(self.run_py(ledger, '--config', config, '--project', a, 'source', '--ref', ref).stdout)
         self.assertEqual(found['record']['data']['text'], 'Across all projects, use QA_SHARED_LEGACY_UTC.')
+        # #33: a wrong hash is refused and the shared note keeps the verified source.
+        bad = ref[:-1] + ('0' if ref[-1] != '0' else '1')
+        self.env['JASON_DREAM'] = '1'
+        try:
+            failed = self.run_py(runtime, '--config', config, '--project', b, 'remember', '--scope', 'global',
+                                 '--subject', 'qa', '--key', 'legacy', '--value', 'QA_SHARED_LEGACY_UTC',
+                                 '--why', '來源：ledger ' + bad, code=1)
+        finally:
+            del self.env['JASON_DREAM']
+        self.assertIn('does not resolve', failed.stdout + failed.stderr)
+        after = ''.join(p.read_text(encoding='utf-8') for p in (self.home / 'memory/shared').rglob('*.md')
+                        if p.name != 'MEMORY.md' and 'archive' not in p.parts)
+        self.assertIn(ref, after)
+        self.assertNotIn(bad, after)
+        self.run_py(ledger, '--config', config, '--project', a, 'source', '--ref', ref)
 
     def test_foreground_mode_keeps_old_flow_without_notify(self):
         self.install("--mode", "foreground")
