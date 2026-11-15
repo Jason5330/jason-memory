@@ -500,12 +500,18 @@ def bounded_index(roots, budget=INDEX_BUDGET):
 def export(roots, output):
     """Write every scope's index and active notes to one UTF-8 Markdown file (#27).
     Python writes the file itself, so no console or PowerShell pipe can turn Chinese into '?'."""
-    output = Path(output).absolute()
-    if output.exists():
+    # Collapse '..' and follow symlink/junction aliases of the parent BEFORE the guard (#29).
+    output = Path(os.path.abspath(output))
+    if output.exists() or output.is_symlink():
         raise ValueError('Export target already exists; choose a new file: ' + str(output))
-    for root in roots.values():
-        if output == root or root in output.parents:
-            raise ValueError('Export target must be outside the memory store')
+    target = output.parent.resolve() / output.name
+    guarded = [Path(root).resolve() for root in roots.values()]
+    if 'global' in roots:
+        guarded.append(Path(roots['global']).resolve().parent)  # Every store under <home>/memory.
+    for root in guarded:
+        if target == root or root in target.parents:
+            raise ValueError('Export target must be outside the memory store: ' + str(target))
+    output = target
     labels = {'global': '全局共用記憶', 'project': '本專案記憶'}
     parts = ['# 記憶匯出（Jason-memory）\n\n匯出日期：' + date.today().isoformat() +
              '。只含索引與現行筆記，不含封存、收據與原始帳本。\n']

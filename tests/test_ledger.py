@@ -449,9 +449,9 @@ class BackgroundModeTests(Base):
         code = dream.consolidate(self.config, self.project, 1, 2, dict(ledger.settings(self.config), dream_agent=['x']),
                                  lambda cmd, text: seen.append((cmd, text)) or 0)
         self.assertEqual(code, 0)
-        self.assertIn('[seq 1', seen[0][1])
+        self.assertIn('[ref local:1:', seen[0][1])
         self.assertIn('報表標題都用淡紫色', seen[0][1])
-        self.assertIn('來源：ledger seq', seen[0][1])
+        self.assertIn('來源：ledger 3d9d6dc09bcfaf35:12:ab12cd34ef56', seen[0][1])
 
     def test_missing_agent_keeps_cursor_for_retry(self):
         import memory_dream as dream
@@ -591,6 +591,25 @@ class BackgroundModeTests(Base):
         with runtime.opened(self.config):
             self.assertEqual(ledger.pending(self.root)['running']['owner'], 'replacement')
 
+    def test_successful_rebuild_hands_queued_records_to_the_next_run(self):
+        """#31: records that reached the threshold during a rebuild start a run right after it."""
+        import memory_dream as dream
+        self.event('UserPromptSubmit', prompt='x')
+        opts = dict(ledger.settings(self.config), dream_every=2)
+
+        def busy(cmd, text):
+            with runtime.opened(self.config):
+                for value in ('a', 'b'):
+                    ledger.append(self.root, 'prompt', {'text': value})
+                # The rebuild still holds the slot, so this check cannot start a worker yet.
+                self.assertIsNone(ledger.maybe_dream(self.root, self.config, self.project, opts))
+            return 0
+        self.assertEqual(dream.rebuild(self.config, self.project, opts, busy)['exit_code'], 0)
+        self.assertEqual(len(self.spawned_workers), 1)
+        with runtime.opened(self.config):
+            state = ledger.pending(self.root)
+        self.assertEqual((state['cursor'], state['head'], state['running']['upto']), (1, 3, 3))
+
     def test_exact_lookup_in_raw_ledger(self):
         self.event('UserPromptSubmit', prompt='錯誤碼是 E-4096-XY，報價 12,345.67 元')
         with runtime.opened(self.config):
@@ -614,7 +633,7 @@ class BackgroundModeTests(Base):
                                  lambda cmd, text: prompts.append(text) or 0)
         self.assertEqual(code, 0)
         self.assertIn('QA-EVIDENCE-7B9A amount 12,345.6700', prompts[0])
-        line = next(line for line in prompts[0].splitlines() if line.startswith('[seq 1 '))
+        line = next(line for line in prompts[0].splitlines() if line.startswith('[ref local:1:'))
         self.assertLessEqual(len(line), dream.RECORD_CAP)
 
     def test_independent_reader_verifies_ledger_format(self):
@@ -669,6 +688,21 @@ class ExportTests(Base):
         again = subprocess.run([sys.executable, str(ROOT / 'tools/memory_runtime.py'), '--config', str(self.config),
                                 'export', '--output', str(target)], capture_output=True, env=env)
         self.assertEqual(again.returncode, 1)  # Never overwrites an earlier export.
+
+    def test_export_cannot_write_into_the_store_via_dotdot(self):
+        """#29: '..' and aliases are normalised before the memory-store guard."""
+        import os
+        import subprocess
+        (self.project / 'outside').mkdir()
+        before = runtime.revision(self.root)
+        sneaky = str(self.project / 'outside' / '..' / '.jason-memory' / 'export.md')
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/memory_runtime.py'), '--config', str(self.config),
+                                 'export', '--output', sneaky], capture_output=True, text=True, encoding='utf-8',
+                                env=dict(os.environ, PYTHONUTF8='1'))
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('outside the memory store', result.stderr)
+        self.assertFalse((self.root / 'export.md').exists())
+        self.assertEqual(runtime.revision(self.root), before)
 
 @unittest.skipUnless(sys.platform == 'win32', 'Windows console behaviour')
 class WindowsNoConsoleWindowTests(unittest.TestCase):

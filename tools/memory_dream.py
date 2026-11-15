@@ -38,7 +38,9 @@ INSTRUCTIONS = """你是 Jason-memory 的背景整理程序（做夢）。前台
 
 做法：
 1. 先看「現有索引」，需要時用 read 讀相關筆記；同一事實沿用既有 subject/key。
-2. 新事實用一次 remember；--why 必須包含來源，例如「來源：ledger seq 12、15」。
+2. 新事實用一次 remember；--why 必須包含來源：原樣複製紀錄開頭的 ref，例如
+   「來源：ledger 3d9d6dc09bcfaf35:12:ab12cd34ef56」（帳本識別碼:seq:雜湊），不要只寫 seq，
+   因為每個專案的帳本都有自己的 seq。
 3. 若與既有值不同（使用者更正），用 context 取得 revision，再用 apply --plan - 一次更正所有相關筆記，
    保留其他事實，筆記正文寫明來源 seq。
 4. 沒有值得保存的內容就什麼都不寫。不要修改原始帳本，不要寫入記憶庫以外的檔案。
@@ -57,10 +59,11 @@ def runtime_prefix(config, project, cfg):
     return ' '.join(shlex.quote(Path(p).as_posix() if i < 2 else p) for i, p in enumerate(parts))
 
 
-def render_record(record):
+def render_record(record, store='local'):
     data = record.get('data')
-    prefix = '[seq ' + str(record['seq']) + ' session ' + str(record.get('session', ''))[:8] + '] '
-    truncated = '…（截斷，完整內容見 ledger seq ' + str(record['seq']) + '）'
+    ref = ledger.reference(store, record)
+    prefix = '[ref ' + ref + ' session ' + str(record.get('session', ''))[:8] + '] '
+    truncated = '…（截斷，完整內容見 ledger ' + ref + '）'
 
     def clip(text, limit):
         return text if len(text) <= limit else text[:limit - len(truncated)] + truncated
@@ -80,10 +83,10 @@ def render_record(record):
     return prefix + clip(text, RECORD_CAP - len(prefix))
 
 
-def chunks(records):
+def chunks(records, store='local'):
     current, size = [], 0
     for record in records:
-        line = render_record(record)
+        line = render_record(record, store)
         if current and size + len(line) > CHUNK_CAP:
             yield current
             current, size = [], 0
@@ -102,7 +105,7 @@ GLOBAL_SCOPE_HINT = ('\n全局版範圍：使用者對 AI 的一般偏好與身�
 def build_prompt(lines, index_text, prefix, global_mode=False):
     return (INSTRUCTIONS + (GLOBAL_SCOPE_HINT if global_mode else '') + '\n指令前綴（Bash）：' + prefix +
             '\n例：' + prefix + ' remember --scope project --type feedback --subject user --key KEY '
-            '--value "完整要求" --why "使用者要求；來源：ledger seq N"\n'
+            '--value "完整要求" --why "使用者要求；來源：ledger REF"\n'
             + prefix + ' read --note 相對路徑.md\n\n## 現有索引\n\n' + index_text +
             '\n\n## 原始紀錄（未整理）\n\n' + '\n'.join(lines) + '\n')
 
@@ -140,6 +143,7 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
             return 65
         records = [r for r in existing if start <= r['seq'] <= upto
                    and r.get('kind') in ('prompt', 'assistant', 'tool', 'document', 'correction')]
+        store = ledger.store_id(cfg, root)
     target = Path(target or config)
     with runtime.opened(target, project) as (tcfg, _, troots):
         index_text = '\n\n'.join(scope + ':\n' + runtime.read_index(r) for scope, r in troots.items())
@@ -152,7 +156,7 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
         return 127
     env = dict(os.environ, JASON_DREAM='1')
     run = runner or (lambda cmd, text: _run_agent(cmd, text, env, project))
-    for lines in chunks(records):
+    for lines in chunks(records, store):
         try:
             code = run(command, build_prompt(lines, index_text, prefix, tcfg.get('mode') == 'global'))
         except (OSError, subprocess.SubprocessError) as exc:
@@ -264,8 +268,11 @@ def rebuild(config, project, opts, runner=None):
                     result['archived'] = sorted(archived)
                 except (OSError, ValueError, KeyError, TypeError) as exc:
                     code, error = 1, 'cannot publish rebuilt notes: ' + str(exc)
-            ledger.release_job(root, owner, head, None if code == 0 else
-                               {'code': code, 'error': 'rebuild failed' + (': ' + error if error else '')})
+            finished = ledger.release_job(root, owner, head, None if code == 0 else
+                                          {'code': code, 'error': 'rebuild failed' + (': ' + error if error else '')})
+            if finished and code == 0:
+                # Records that reached the threshold while the rebuild held the slot start now (#31).
+                ledger.maybe_dream(root, config, project, opts)
     finally:
         if created_staging:
             shutil.rmtree(staging, ignore_errors=True)

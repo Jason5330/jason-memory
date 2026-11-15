@@ -162,6 +162,48 @@ def replay(root, session=None):
     return [r for r in verified_records(root) if session is None or r['session'] == str(session)]
 
 
+STORE_ID_LEN = 16
+
+
+def store_id(cfg, root):
+    """Ledger identifier used in source references: the global project store's hash prefix, or
+    `local` for a project-edition store (its ledger is the only one next to the config)."""
+    return Path(root).name[:STORE_ID_LEN] if cfg.get('mode') == 'global' else 'local'
+
+
+def reference(store, record):
+    """Unambiguous source reference `<store>:<seq>:<hash12>` (#30): seq numbers repeat per ledger."""
+    return str(store) + ':' + str(record['seq']) + ':' + str(record['hash'])[:12]
+
+
+def source(roots, ref):
+    """Locate and verify the raw record a note cites, from any project of the same memory home."""
+    parts = str(ref).strip().split(':')
+    if len(parts) != 3 or not parts[1].isdigit() or len(parts[2]) != 12 or any(
+            c not in '0123456789abcdef' for c in parts[2]):
+        raise ValueError('Reference must look like STORE:SEQ:HASH12, e.g. 3d9d6dc09bcfaf35:7:ab12cd34ef56')
+    store, seq, prefix = parts[0], int(parts[1]), parts[2]
+    if store == 'local':
+        if 'global' in roots:
+            raise ValueError('`local` references belong to a project-edition store')
+        root = roots['project']
+    else:
+        if 'global' not in roots or len(store) != STORE_ID_LEN or any(c not in '0123456789abcdef' for c in store):
+            raise ValueError('Unknown ledger store in reference: ' + store)
+        projects = Path(roots['global']).parent / 'projects'
+        matches = [p for p in projects.glob(store + '*') if p.is_dir()]
+        if len(matches) != 1:
+            raise ValueError('Cannot find exactly one project ledger for store ' + store)
+        root = runtime.storelib.safe(matches[0], projects)
+    existing = verified_records(root)
+    if not 1 <= seq <= len(existing):
+        raise ValueError('Reference seq not in that ledger: ' + str(seq))
+    record = existing[seq - 1]
+    if not record['hash'].startswith(prefix):
+        raise ValueError('Reference hash does not match the ledger record; the source changed or is wrong')
+    return {'ledger': str(root), 'record': record}
+
+
 def search(root, text, limit=20):
     """Exact-text lookup in the raw layer when a precise quote, number or error is needed."""
     needle = text.casefold()
@@ -360,7 +402,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path)
-    parser.add_argument('command', choices=['append', 'verify', 'replay', 'search', 'mirror',
+    parser.add_argument('command', choices=['append', 'verify', 'replay', 'search', 'mirror', 'source',
                                             'pending', 'dream-run'])
     parser.add_argument('--kind')
     parser.add_argument('--data', help='JSON value for append')
@@ -369,6 +411,7 @@ def main():
     parser.add_argument('--text')
     parser.add_argument('--upto', type=int)
     parser.add_argument('--owner')
+    parser.add_argument('--ref', help='source: STORE:SEQ:HASH12 cited by a note')
     args = parser.parse_args()
     try:
         if args.command == 'dream-run':
@@ -382,6 +425,8 @@ def main():
                 result = verify(root)
             elif args.command == 'replay':
                 result = replay(root, args.session or None)
+            elif args.command == 'source':
+                result = source(roots, args.ref or '')
             elif args.command == 'search':
                 result = search(root, args.text or '')
             elif args.command == 'mirror':

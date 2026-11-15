@@ -223,9 +223,11 @@ MEMORY.md 不存在時才使用 templates/MEMORY.md 初始化，保留既有索�
 | 背景整理進度、有沒有出錯 | `python tools/memory_ledger.py --config .jason-memory.json pending` |
 | 找以前說過的原話、數字、錯誤訊息 | `python tools/memory_ledger.py --config .jason-memory.json search --text "關鍵字"` |
 | 匯出成一份 Markdown | `python tools/memory_runtime.py --config .jason-memory.json export --output 記憶匯出.md` |
+| 筆記寫的來源是哪句話 | `python tools/memory_ledger.py --config .jason-memory.json source --ref 來源編號` |
 
 `pending` 會顯示 `cursor`（整理到哪）、`pending`（還有幾筆沒整理）、`running`（是否正在整理）與
-`last_error`（上次錯誤）。筆記是一般 Markdown 檔，也可以直接打開來看。
+`last_error`（上次錯誤）。筆記的 `Why` 會寫「來源：ledger 識別碼:seq:雜湊」，把這串交給 `source --ref`
+就能查回並驗證原始紀錄；全局版從任何資料夾都能查到別的專案的來源。筆記是一般 Markdown 檔，也可以直接打開來看。
 
 ### 想更快生效
 

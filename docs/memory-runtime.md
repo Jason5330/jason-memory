@@ -198,7 +198,10 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
   帳本記錄來源路徑、大小與指紋；同內容只存一份，不改動原件。
 - **背景整理（做夢）**：每次追加紀錄（提示、工具、回覆）後，未整理紀錄數 ≥ `dream_every` 且沒有執行中的工作時，以分離程序啟動
   `dream-run`，前台不等待。worker 把紀錄（含有長度上限的工具輸入與結果）與現有索引交給 Agent CLI（環境變數 `JASON_DREAM=1`，
-  只有它能寫入），由它用 `remember`／`apply` 保存並在 `--why` 或正文寫明「來源：ledger seq N」。
+  只有它能寫入），由它用 `remember`／`apply` 保存並在 `--why` 或正文寫明來源編號
+  「來源：ledger 識別碼:seq:雜湊前12碼」（專案版識別碼為 `local`，全局版為該專案帳本資料夾名稱前 16 碼）。
+  每個專案的帳本都從 seq 1 開始，只寫 seq 會指錯帳本（#30）。`memory_ledger.py source --ref 編號`
+  驗證整條帳本後回傳該筆原始紀錄，雜湊不符即報錯；全局版從任一專案都能查到其他專案的來源。
   Agent 必須以最後一行 `JASON_DREAM_STATUS: ok` 回報全部完成（權限被擋、出錯則回 `failed`）。
   成功才推進游標；失敗（含找不到 Agent CLI 127、未回報 ok 75）記 `last_error` 並於下次觸發重試；
   沒有新紀錄不重跑。`memory_ledger.py pending` 查看狀態，`memory_dream.py prompt` 預覽提示。

@@ -113,6 +113,42 @@ class GlobalBackgroundModeTests(unittest.TestCase):
         self.assertIn((self.home / "framework/tools/codex_notify.py").as_posix(), data)
         self.assertNotIn("project A", data)
 
+    def test_shared_note_source_resolves_to_the_right_project_ledger(self):
+        """#30: both projects have a seq 1; a reference still finds B's record from A."""
+        self.install()
+        config = self.home / "framework/memory-config.json"
+        tools = self.home / "framework/tools"
+        a, b = self.base / "A", self.base / "B"
+        a.mkdir()
+        b.mkdir()
+        for folder, text in ((a, "QA: keep timestamps in UTC"), (b, "Across all projects, use QA_SHARED_UTC.")):
+            self.run_py(tools / "memory_ledger.py", "--config", config, "--project", folder, "append",
+                        "--kind", "prompt", "--data", json.dumps({"text": text}))
+        prompt = self.run_py(tools / "memory_dream.py", "--config", config, "--project", b, "prompt").stdout
+        ref = prompt.split("[ref ")[1].split(" ")[0]
+        store, seq, digest = ref.split(":")
+        self.assertEqual(seq, "1")
+        self.assertEqual(len(store), 16)
+        found = json.loads(self.run_py(tools / "memory_ledger.py", "--config", config, "--project", a,
+                                       "source", "--ref", ref).stdout)
+        self.assertEqual(found["record"]["data"]["text"], "Across all projects, use QA_SHARED_UTC.")
+        self.assertIn(store, found["ledger"])
+        bad = self.run_py(tools / "memory_ledger.py", "--config", config, "--project", a, "source",
+                          "--ref", store + ":1:000000000000", code=1)
+        self.assertIn("hash does not match", bad.stderr)
+
+    def test_export_cannot_write_into_another_project_store(self):
+        """#29: global mode guards every store under <home>/memory, even through '..'."""
+        self.install()
+        config = self.home / "framework/memory-config.json"
+        workspace = self.base / "W"
+        workspace.mkdir()
+        sneaky = self.base / "W" / ".." / "shared home" / "memory" / "shared" / "x.md"
+        result = self.run_py(self.home / "framework/tools/memory_runtime.py", "--config", config, "--project",
+                             workspace, "export", "--output", sneaky, code=1)
+        self.assertIn("outside the memory store", result.stderr)
+        self.assertFalse((self.home / "memory/shared/x.md").exists())
+
     def test_foreground_mode_keeps_old_flow_without_notify(self):
         self.install("--mode", "foreground")
         config = json.loads((self.home / "framework/memory-config.json").read_text(encoding="utf-8"))
