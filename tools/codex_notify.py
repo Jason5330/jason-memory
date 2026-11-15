@@ -65,7 +65,6 @@ def handle(payload, cwd=None):
                     and r['data'].get('turn') == turn}
         events = [('prompt', index, str(message)) for index, message in enumerate(payload.get('input-messages') or [])]
         events.append(('assistant', 0, str(payload.get('last-assistant-message') or '')))
-        added = 0
         for kind, part, text in events:
             if (kind, part) in seen:
                 continue
@@ -73,9 +72,7 @@ def handle(payload, cwd=None):
             if turn:
                 data.update(turn=turn, part=part)
             ledger.append(root, kind, data, session)
-            added += 1
-        if not added:
-            return None
+        # Even a complete redelivery can resume queued work after a worker failure (#41).
         return ledger.maybe_dream(root, config, project, opts)
 
 
