@@ -342,9 +342,9 @@ def handle(event, config):
         state = runtime.read_json(state_path) if state_path.exists() else {}
         if name in TOOL_EVENTS:
             if record_tool:
-                ledger.append(roots['project'], 'tool', {'tool': event.get('tool_name', ''),
-                              'input': event.get('tool_input'), 'result': output}, event.get('session_id', ''))
-                ledger.maybe_dream(roots['project'], config, project, ledger_settings(config))
+                if record(roots['project'], 'tool', {'tool': event.get('tool_name', ''),
+                          'input': event.get('tool_input'), 'result': output}, event.get('session_id', '')):
+                    ledger.maybe_dream(roots['project'], config, project, ledger_settings(config))
                 if failed or not handles:
                     return {}
             if state:
@@ -363,8 +363,8 @@ def handle(event, config):
         fingerprint = store_fingerprint(roots)
         opts = ledger_settings(config)
         if name == 'UserPromptSubmit' and opts['enabled']:
-            ledger.append(roots['project'], 'prompt', {'text': event.get('prompt', '')}, event.get('session_id', ''))
-            ledger.maybe_dream(roots['project'], config, project, opts)
+            if record(roots['project'], 'prompt', {'text': event.get('prompt', '')}, event.get('session_id', '')):
+                ledger.maybe_dream(roots['project'], config, project, opts)
         if name == 'UserPromptSubmit' and state and state.get('fingerprint') == fingerprint:
             # Cheap path: nothing on disk changed since the last snapshot; start a new turn baseline.
             state.update({'turn_started_ns': time.time_ns(), 'receipts': [], 'retried': False,
@@ -372,10 +372,10 @@ def handle(event, config):
             runtime.storelib.atomic_write(state_path, json.dumps(state))
             return {}
         if name == 'Stop' and opts['enabled']:
-            ledger.append(roots['project'], 'assistant', {'text': event.get('last_assistant_message', ''),
-                          'stop_hook_active': bool(event.get('stop_hook_active'))}, event.get('session_id', ''))
             # The last turn before the user leaves must still be able to start consolidation.
-            ledger.maybe_dream(roots['project'], config, project, opts)
+            if record(roots['project'], 'assistant', {'text': event.get('last_assistant_message', ''),
+                      'stop_hook_active': bool(event.get('stop_hook_active'))}, event.get('session_id', '')):
+                ledger.maybe_dream(roots['project'], config, project, opts)
         if (name == 'Stop' and state and state.get('fingerprint') == fingerprint
                 and state.get('files') is not None and not success_claim(event.get('last_assistant_message', ''))
                 and state.get('versions') == state.get('seen')):
@@ -444,6 +444,19 @@ def handle(event, config):
         return {'decision': 'block', 'reason': reason}
 
 
+LEDGER_WARNINGS = []
+
+
+def record(root, kind, data, session):
+    """Append to the raw ledger; a broken ledger becomes a visible warning, not a blocked turn."""
+    try:
+        ledger.append(root, kind, data, session)
+        return True
+    except (OSError, ValueError) as exc:
+        LEDGER_WARNINGS.append('Jason-memory：原始帳本無法寫入，本次事件未記錄（' + str(exc) + '）')
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=Path, required=True)
@@ -455,6 +468,9 @@ def main():
             raise ValueError('Hook input exceeds limit')
         event = json.loads(raw.decode('utf-8-sig'))
         result = handle(event, args.config.absolute())
+        if LEDGER_WARNINGS:
+            result = dict(result or {})
+            result['systemMessage'] = '\n'.join(filter(None, [result.get('systemMessage')] + LEDGER_WARNINGS))
         if result:
             print(json.dumps(result, ensure_ascii=True))
         return 0

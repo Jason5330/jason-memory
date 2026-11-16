@@ -497,10 +497,18 @@ REF_LIKE = re.compile(r'(?<![0-9A-Za-z_])(?:local|[0-9a-f]{8,32}):\d+:[0-9a-f]{6
 WHY_LINE = re.compile(r'^Why: .*$', re.M)
 
 
+# Text cited as a ledger source (`ledger X:N:Y`, `來源：ledger ...`): validated even when its store
+# or hash part is malformed - 5 characters, non-hex - so a bad citation cannot slip past (#52).
+EXPLICIT_REF = re.compile(r'(?i)\bledger\s+`?([^\s`，。、；;,()（）]+:[^\s`，。、；;,()（）]+:[^\s`，。、；;,()（）]+)')
+LOOSE_REF = re.compile(r'(?<![0-9A-Za-z_])(?:local|[0-9a-f]{8,32}):\d+:[0-9A-Za-z]+(?![0-9A-Za-z_])', re.I)
+
+
 def note_source_refs(content):
     # Keep inline code citations; skip literal blocks and comments using the note parser (#42).
     active = storelib.doctor._active_markdown(content, keep_inline=True)
-    return set(REF_LIKE.findall(active))
+    refs = set(REF_LIKE.findall(active)) | set(LOOSE_REF.findall(active))
+    refs |= {ref.rstrip('.') for ref in EXPLICIT_REF.findall(active)}
+    return refs
 
 
 def default_sources(root, scope):

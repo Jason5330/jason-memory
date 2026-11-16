@@ -162,6 +162,13 @@ def append(root, kind, data, session=''):
         raise ValueError('Ledger record needs a kind')
     path = raw_root(root) / LEDGER
     existing = records(root)
+    try:
+        verify_chain(existing)
+    except ValueError as exc:
+        # A record appended after a broken link could never be replayed (#51). Keep the file as is
+        # for diagnosis and report that this event was not stored.
+        raise ValueError(str(exc) + '; new ' + kind + ' event NOT recorded, existing ledger left unchanged '
+                         'for diagnosis (run memory_ledger.py verify)')
     previous = existing[-1]['hash'] if existing else '0' * 64
     record = {'seq': len(existing) + 1, 'ts_ns': time.time_ns(), 'session': str(session),
               'kind': kind, 'data': _clip(data), 'prev': previous}
@@ -190,6 +197,7 @@ def mirror(root, source, session=''):
     source = Path(source).resolve(strict=True)
     if not source.is_file():
         raise ValueError('mirror needs a regular file')
+    verify_chain(records(root))  # Refuse before writing a blob that no record could reference (#51).
     content = source.read_bytes()
     if len(content) > runtime.MAX_BYTES:
         raise ValueError('Document exceeds mirror limit')
@@ -509,6 +517,7 @@ def main():
             elif args.command == 'mirror':
                 result = mirror(root, args.file, args.session)
             else:
+                verify(root)  # Status of a ledger that fails verification is an error, not a count.
                 result = pending(root)
         runtime.emit_json(result)
         return 0

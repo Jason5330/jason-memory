@@ -72,14 +72,34 @@ _ENV_HINT = re.compile(r'(?:環境變數|环境变量|變數名|变量名|env(?:
 _CANDIDATE = re.compile(r'[A-Za-z0-9][A-Za-z0-9_\-./+=]{7,}')
 
 
+# HTTP credentials in plain text (#50): `Authorization: <scheme> VALUE` and bare `Bearer VALUE`.
+# With a scheme any token counts; without one, only token-like values (digits+letters or long).
+_AUTH_HEADER = re.compile(
+    r'(?i)\b(?:proxy-)?authorization\b["\']?\s*[:=]\s*["\']?'
+    r'(?P<scheme>(?:basic|bearer|token|negotiate|apikey|api-key|key)\s+)?(?P<value>[A-Za-z0-9._~+/=:-]{6,})')
+_BEARER = re.compile(r'(?i)\bbearer\s+(?P<value>[A-Za-z0-9._~+/=-]{12,})')
+
+
+def _auth_values(text):
+    for match in _AUTH_HEADER.finditer(text):
+        value = match.group('value')
+        if match.group('scheme') or len(value) >= 16 or (re.search(r'\d', value) and re.search(r'[A-Za-z]', value)):
+            yield value
+    for match in _BEARER.finditer(text):
+        yield match.group('value')
+
+
 def secret_values(text):
     """Return credential-looking values in text. Conservative: env var NAMES are allowed."""
     found = [m.group(0) for m in _SECRET_PREFIX.finditer(text)]
+    found += list(_auth_values(text))
     for keyword in re.finditer(_SECRET_WORD, text, re.I):
         window = text[keyword.end():keyword.end() + 60]
         for match in _CANDIDATE.finditer(window):
             value = match.group(0)
             before = window[:match.start()]
+            if len(before) > 32 or re.search(r'[,，。;；&|\n<>]|\.\s', before):
+                break  # A value belongs to its keyword only within the same short clause (no `&& echo X`).
             if not (re.search(r'\d', value) and re.search(r'[A-Za-z]', value)):
                 continue  # Plain words or identifiers without digits are not treated as values.
             if _ENV_HINT.search(before) or re.fullmatch(r'\$\{?[A-Z_][A-Z0-9_]*\}?', value):
@@ -91,7 +111,35 @@ def secret_values(text):
     return sorted(set(found))
 
 
+# Raw-ledger redaction is broader than the note guard above: a credential NAME followed by an
+# assignment or header separator marks its value as secret, whatever the value looks like
+# (letters only included). False positives only hide text in the raw layer; notes keep the
+# conservative secret_values() check.
+_NAME = (r'(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|'
+         r'private[_-]?key|credentials?|session[_-]?id|sid)')
+_ASSIGNED = re.compile(
+    r'(?i)(?<![A-Za-z0-9])(?P<name>(?:[A-Za-z0-9]+[_.-])*' + _NAME + r')(?![A-Za-z0-9])["\']?\s*(?:=|:)\s*["\']?'
+    r'(?P<value>[^\s"\'&;,<>]{3,})')
+_FLAG = re.compile(r'(?i)(?<![A-Za-z0-9-])--?(?:password|passwd|pass|token|api-?key|secret|client-secret)'
+                   r'(?:=|\s+)["\']?(?P<value>[^\s"\']{3,})')
+_COOKIE_LINE = re.compile(r'(?im)^(?P<head>[^\S\n]*(?:set-)?cookie\s*:)(?P<body>[^\n]*)$')
+_COOKIE_VALUE = re.compile(r'=(?P<value>[^;\s]+)')
+_USERINFO = re.compile(r'(?i)\b(?P<head>[a-z][a-z0-9+.-]*://[^/\s:@]+):(?P<value>[^@\s/]+)@')
+_PRIVATE_BLOCK = re.compile(r'(-----BEGIN (?P<kind>[A-Z ]*)PRIVATE KEY-----).*?(-----END (?P=kind)PRIVATE KEY-----|\Z)', re.S)
+
+
 def redact(text):
+    """Mask credential values before anything reaches the raw ledger (#38, #43, #50)."""
+    text = _PRIVATE_BLOCK.sub('[REDACTED PRIVATE KEY]', text)
     for value in secret_values(text):
         text = text.replace(value, '[REDACTED]')
-    return text
+    text = _COOKIE_LINE.sub(lambda m: m.group('head') + _COOKIE_VALUE.sub('=[REDACTED]', m.group('body')), text)
+    text = _USERINFO.sub(lambda m: m.group('head') + ':[REDACTED]@', text)
+    text = _FLAG.sub(lambda m: m.group(0).replace(m.group('value'), '[REDACTED]'), text)
+
+    def assigned(match):
+        value = match.group('value')
+        if value.startswith(('$', '%', '[REDACTED]')) or re.fullmatch(r'\d{1,4}', value):
+            return match.group(0)  # Env references and small counts are not credentials.
+        return match.group(0)[:match.start('value') - match.start()] + '[REDACTED]'
+    return _ASSIGNED.sub(assigned, text)

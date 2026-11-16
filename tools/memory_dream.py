@@ -256,8 +256,12 @@ def rebuild(config, project, opts, runner=None):
                     for scope, path in roots.items():
                         rebuilt = runtime.notes(staged[scope])
                         current = runtime.notes(path)
-                        # One project's replay cannot infer that a shared note from another is obsolete.
-                        retire = sorted(current.keys() - rebuilt.keys()) if scope == 'project' else []
+                        if scope == 'project':
+                            retire = sorted(current.keys() - rebuilt.keys())
+                        else:
+                            # Staging starts from the full shared snapshot, so a shared note missing there
+                            # was explicitly retired by this rebuild (#49). Notes it never saw stay.
+                            retire = sorted((current.keys() & shared_notes.keys()) - rebuilt.keys())
                         updates = {name: text for name, text in rebuilt.items() if current.get(name) != text}
                         if updates or retire:
                             plans[scope] = {'expected_revision': revisions[scope], 'updates': updates, 'retire': retire}
