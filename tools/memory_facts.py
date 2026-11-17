@@ -118,7 +118,7 @@ def secret_values(text):
 _NAME = (r'(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|'
          r'private[_-]?key|credentials?|session[_-]?id|sid)')
 # A secret value is either quoted - then the WHOLE quoted text, spaces included (#54) - or one bare token.
-_VALUE = r'(?:"(?P<dq>(?:[^"\\\n]|\\.)*)"|\'(?P<sq>(?:[^\'\\\n]|\\.)*)\'|(?P<value>[^\s"\'&;,<>]{3,}))'
+_VALUE = r'(?:"(?P<dq>(?:[^"\\\n]|\\.)*)"|\'(?P<sq>(?:[^\'\\\n]|\\.)*)\'|(?P<value>[^\s"\'&;,<>]+))'
 _ASSIGNED = re.compile(
     r'(?i)(?<![A-Za-z0-9])(?P<name>(?:[A-Za-z0-9]+[_.-])*' + _NAME + r')(?![A-Za-z0-9])["\']?\s*(?:=|:)\s*' + _VALUE)
 _FLAG = re.compile(r'(?i)(?<![A-Za-z0-9-])--?(?:password|passwd|pass|token|api-?key|secret|client-secret)'
@@ -143,8 +143,18 @@ def _mask_value(match, keep=None):
 
 def _not_a_credential(value):
     stripped = value.strip()
-    return (not stripped or stripped == '[REDACTED]' or stripped.startswith(('$', '%'))
-            or re.fullmatch(r'\d{1,4}', stripped) is not None)  # Env references and small counts.
+    return (not stripped or stripped == '[REDACTED]' or re.fullmatch(
+        r'\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}|\$env:[A-Za-z_]\w*|%[A-Za-z_]\w*%', stripped,
+        flags=re.I) is not None)  # Keep exact environment variable references, not numeric credentials.
+
+
+def note_has_credential(text):
+    # Notes must not publish explicitly labelled PINs that have no recognizable secret prefix.
+    return bool(secret_values(text)) or any(
+        value and value.strip().rstrip('.').isdecimal()
+        for pattern in (_ASSIGNED, _FLAG) for match in pattern.finditer(text)
+        for value in (match.group('dq'), match.group('sq'), match.group('value'))
+    )
 
 
 def redact(text):

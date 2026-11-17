@@ -103,6 +103,20 @@ class PurgeTests(unittest.TestCase):
         self.run_cli(self.project / 'tools/purge_memory.py')
         self.assertFalse(self.home.exists())
 
+    def test_explicit_purge_home_does_not_include_other_attached_home(self):
+        old, active = self.base / 'old global', self.base / 'active global'
+        self.install(old)
+        self.install(active)
+        before = self.snapshot()
+        result = self.run_cli(self.project / 'tools/purge_memory.py', ['--home', str(old), '--dry-run'])
+        plan = json.loads(result.stdout)
+        self.assertEqual(plan['global_homes'], [str(old)])
+        self.assertIn(str(old / 'memory/shared/user.md'), plan['delete'])
+        self.assertFalse(any(active in Path(path).parents for path in plan['delete'] + plan['edit']))
+        paths = [Path(path) for path in plan['delete'] + plan['edit']]
+        self.assertFalse(any(self.profile in path.parents for path in paths))
+        self.assertEqual(self.snapshot(), before)
+
     def test_global_custom_home_preserves_unrelated_files(self):
         self.install(self.base / 'existing folder')
         self.put(self.home / 'family.xlsx', b'unrelated work')

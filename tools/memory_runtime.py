@@ -114,6 +114,16 @@ def notes(root):
     return result
 
 
+def check_write_paths(root, names):
+    paths = {}
+    for name in names:
+        path = note_path(root, name)
+        if path.resolve().relative_to(root).as_posix() != name:
+            raise ValueError('Use the canonical relative note path: ' + name)
+        if paths.setdefault(path, name) != name:
+            raise ValueError('Note paths refer to the same file: ' + paths[path] + ', ' + name)
+
+
 def read_index(root):
     index = storelib.safe(root / 'MEMORY.md', root)
     with index.open('rb') as stream:
@@ -183,6 +193,7 @@ def recover(root, _prepared=None):
         raise ValueError('Invalid transaction journal; manual review required')
     if not isinstance(tx['notes'], dict) or not isinstance(tx['before'], dict) or not isinstance(tx['remove'], list):
         raise ValueError('Invalid transaction payload')
+    check_write_paths(root, [*tx['notes'], *tx['before'], *tx['remove']])
     for name, content in list(tx['notes'].items()) + list(tx['before'].items()):
         note_path(root, name)
         if not isinstance(content, str):
@@ -365,6 +376,7 @@ def prepare_apply(root, plan, scope, sources=None):
     final = dict(old)
     if not isinstance(plan['updates'], dict) or not isinstance(plan['retire'], list):
         raise ValueError('Invalid updates/retire plan')
+    check_write_paths(root, [*old, *plan['updates'], *plan['retire']])
     for name in plan['retire']:
         note_path(root, name)
         if name not in old or name in plan['updates']:
@@ -379,8 +391,7 @@ def prepare_apply(root, plan, scope, sources=None):
         if old.get(name) != content and fm and fm.get('type') in ('user', 'feedback') and not structured:
             raise ValueError('New/corrected user or feedback notes require a jason-facts JSON block: ' + name)
         if old.get(name) != content:
-            leaked = memory_facts.secret_values(content)
-            if leaked:
+            if memory_facts.note_has_credential(content):
                 raise ValueError(SECRET_ERROR + name)
             # Every newly cited source must resolve to a verified raw record (#33, #36).
             added = note_source_refs(content) - note_source_refs(old.get(name, ''))
@@ -444,7 +455,7 @@ def remember(root, subject, key, value, why, scope='project', kind=None, roots=N
         raise ValueError('--type must be one of: ' + ', '.join(NOTE_TYPES))
     if scope == 'global' and kind == 'project':
         raise ValueError('Project notes require project scope')
-    if memory_facts.secret_values(' '.join((subject, key, value, why))):
+    if memory_facts.note_has_credential(' '.join((subject, key, value, why))):
         raise ValueError(SECRET_ERROR + 'remember --value/--why')
     subject, key = memory_facts.canonical(subject), memory_facts.canonical(key)
     data = notes(root)

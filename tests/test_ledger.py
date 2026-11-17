@@ -72,10 +72,46 @@ class CredentialTests(Base):
         for text in ['token 數量上限 4096 tokens', '輸出的時間全部使用 24 小時制', 'GitHub token 存放在 1Password']:
             self.assertEqual(memory_facts.secret_values(text), [], text)
 
+    def test_plaintext_passwords_mask_short_numbers_but_keep_environment_references(self):
+        text = '\n'.join(['password="0427"', 'password=581', '--password 7391', 'password=2',
+                          'retry_count=3', 'password="$QA_VAR"', 'password=$env:QA_VAR',
+                          'password="%literal"'])
+        expected = '\n'.join(['password="[REDACTED]"', 'password=[REDACTED]', '--password [REDACTED]',
+                              'password=[REDACTED]', 'retry_count=3', 'password="$QA_VAR"',
+                              'password=$env:QA_VAR', 'password="[REDACTED]"'])
+        self.assertEqual(memory_facts.redact(text), expected)
+
+    def test_numeric_credentials_are_refused_in_notes_but_metrics_can_be_saved(self):
+        saved = self.remember('retry_count', 'retry_count=3')
+        name = Path(saved['paths'][0]).relative_to(self.root).as_posix()
+        with runtime.opened(self.config):
+            before = runtime.notes(self.root)
+            with self.assertRaisesRegex(ValueError, 'NOT SAVED'):
+                runtime.remember(self.root, 'qa', 'credential', 'password="0427"', 'Synthetic example')
+            plan = {'expected_revision': runtime.revision(self.root), 'retire': [],
+                    'updates': {name: before[name] + '\n\n--password 7391\n'}}
+            with self.assertRaisesRegex(ValueError, 'NOT SAVED'):
+                runtime.apply(self.root, plan)
+            self.assertEqual(runtime.notes(self.root), before)
+
 
 class TypeTests(Base):
-    """Issue #6: remember files identity and project constraints under the right type."""
+    """Note types and safe paths used by batch writes."""
 
+    def test_apply_rejects_note_alias_before_retiring_existing_note(self):
+        saved = self.remember('format', 'QA old value')
+        name = Path(saved['paths'][0]).relative_to(self.root).as_posix()
+        with runtime.opened(self.config):
+            before = runtime.notes(self.root)
+            index = runtime.read_index(self.root)
+            for alias in (name.replace('/', '/./'), name.replace('/', '//')):
+                with self.subTest(alias=alias):
+                    plan = {'expected_revision': runtime.revision(self.root), 'retire': [name],
+                            'updates': {alias: before[name].replace('QA old value', 'QA new value')}}
+                    with self.assertRaisesRegex(ValueError, 'canonical relative note path'):
+                        runtime.apply(self.root, plan)
+                    self.assertEqual(runtime.notes(self.root), before)
+                    self.assertEqual(runtime.read_index(self.root), index)
     def test_type_controls_folder_and_frontmatter(self):
         for kind, key in [('user', 'role'), ('project', 'offline.only')]:
             saved = self.remember(key, '值 ' + key, kind=kind)
@@ -400,6 +436,24 @@ class BackgroundModeTests(Base):
     """Issue #11 V3, V7, V8, V9: foreground never writes memory; background worker does."""
 
     ledger_cfg = {'enabled': True, 'foreground_writes': False, 'dream_every': 3}
+
+    def test_rejects_new_bad_event_and_still_consolidates_legacy_data_shape(self):
+        import memory_dream as dream
+        with runtime.opened(self.config):
+            legacy = ledger.append(self.root, 'prompt', {'text': 'initial shape'})
+            path = ledger.raw_root(self.root) / ledger.LEDGER
+            old = path.read_bytes()
+            with self.assertRaisesRegex(ValueError, 'must be a JSON object'):
+                ledger.append(self.root, 'prompt', ['new bad data'])
+            self.assertEqual(path.read_bytes(), old)
+            legacy['data'] = ['legacy payload']
+            legacy['hash'] = ledger._hash(legacy)
+            path.write_bytes((json.dumps(legacy) + '\n').encode('utf-8'))
+            ledger.append(self.root, 'prompt', {'text': 'next valid event'})
+        prompts = []
+        self.assertEqual(dream.consolidate(self.config, self.project, 1, 2, ledger.settings(self.config),
+                                          lambda cmd, text: prompts.append(text) or 0), 0)
+        self.assertTrue(any('legacy payload' in prompt and 'next valid event' in prompt for prompt in prompts))
 
     def cli(self, *args, env=None):
         import os

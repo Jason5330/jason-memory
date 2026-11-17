@@ -51,6 +51,22 @@ def managed_span(data, path):
     return start, end
 
 
+def configured_framework(path, background):
+    if path.is_symlink() or path.resolve() != path:
+        raise ValueError('Redirected installation target: ' + str(path))
+    config = json.loads(path.read_text(encoding='utf-8-sig')) if path.exists() else {}
+    if not isinstance(config, dict) or config.get('mode', 'global') != 'global' or config.get('version', 1) != 1:
+        raise ValueError('Existing framework configuration is not a global memory config')
+    ledger = config.get('ledger', {})
+    if not isinstance(ledger, dict):
+        raise ValueError('Existing framework ledger configuration must be an object')
+    config = {'version': 1, 'mode': 'global', 'home': '..'}
+    if background or ledger:
+        config['ledger'] = {**{'dream_every': 20, 'dream_agent': 'auto'}, **ledger,
+                            'enabled': background, 'foreground_writes': not background}
+    return (json.dumps(config, separators=(',', ':')) + '\n').encode('utf-8')
+
+
 def background_instructions(home):
     paths = json.dumps({"memory_home": str(home),
                         "runtime": str(home / "framework/tools/memory_runtime.py"),
@@ -191,6 +207,10 @@ def main(argv=None):
         for target in targets:
             original = target.read_bytes() if target.exists() else b""
             span = managed_span(original, target)
+            if args.uninstall and span:
+                owner = hook_settings.managed_home(original[span[0]:span[1]])
+                if owner is not None and absolute(owner) != home:
+                    continue
             unmanaged = original[:span[0]] + original[span[1]:] if span else original
             if args.uninstall or target == legacy_claude:
                 updated = unmanaged
@@ -209,10 +229,11 @@ def main(argv=None):
             if settings.is_symlink() or settings.resolve() != settings:
                 raise ValueError('Redirected Claude settings are not supported')
             original = settings.read_bytes() if settings.exists() else b''
-            command = ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(),
-                              (home / 'framework/tools/claude_memory_hook.py').as_posix(),
+            script = home / 'framework/tools/claude_memory_hook.py'
+            command = ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(), script.as_posix(),
                               '--config', (home / 'framework/memory-config.json').as_posix(), '--jason-hook'))
-            updated = hook_settings.merged(original, None if args.uninstall else command)
+            updated = (hook_settings.merged(original, owned_script=script) if args.uninstall
+                       else hook_settings.merged(original, command))
             if updated != original and (not args.uninstall or original):
                 edits.append((settings, original, updated, settings.exists()))
         index = home / "memory/shared/MEMORY.md"
@@ -225,12 +246,8 @@ def main(argv=None):
                     raise ValueError('Redirected framework source: ' + str(origin))
                 copies.append((home / "framework" / dest, origin.read_bytes()))
             copies.append((home / "GENERIC_INSTRUCTIONS.md", block))
-            config = {"version": 1, "mode": "global", "home": ".."}
-            if background:
-                config["ledger"] = {"enabled": True, "foreground_writes": False,
-                                    "dream_every": 20, "dream_agent": "auto"}
-            copies.append((home / 'framework/memory-config.json',
-                           (json.dumps(config, separators=(",", ":")) + "\n").encode("utf-8")))
+            config_path = home / 'framework/memory-config.json'
+            copies.append((config_path, configured_framework(config_path, background)))
             if index.is_symlink() or index.resolve() != index:
                 raise ValueError("Redirected shared index is not supported: " + str(index))
             if index.exists() and not index.is_file():

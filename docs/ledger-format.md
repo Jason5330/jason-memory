@@ -42,6 +42,7 @@ SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --
 `password:` 等「憑證名稱＋`=`或`:`」後的值、`--password` 類參數、`Cookie`／`Set-Cookie` 的值、網址中的密碼
 （`https://user:密碼@host`）與整段私鑰（#50）。值若用引號包住，整段引號內容都遮蔽（含空格與跳脫引號，#54）。
 環境變數引用（`${TOKEN}`）保留。
+明確密碼欄位或參數中的短數字也會遮蔽。一般計量欄位如 `retry_count` 保留。
 
 雜湊鏈或已整理游標的 checkpoint 驗證不通過時（含截短、重新計算雜湊的改寫，#53），`append`、`mirror` 一律拒絕寫入，帳本保持原狀供診斷；Claude hook 只顯示警告、不阻擋對話（#51）。
 
@@ -53,6 +54,8 @@ SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --
 | `assistant` | `{"text": 最終回覆, "stop_hook_active"?: bool, "host"?: "codex"}` |
 | `tool` | `{"tool": 名稱, "input": 參數, "result": 輸出}`（Claude hook 記錄 Shell 成功及失敗結果，失敗輸出含 `error` 與 `is_interrupt`） |
 | `document` | `{"path": 原始路徑, "sha256": 指紋, "size": 位元組數}` |
+
+新增的 `prompt`、`assistant`、`tool` 必須使用 JSON 物件。舊版保存的其他 JSON 型別仍可重播與背景整理。
 
 ## 來源編號
 

@@ -160,6 +160,8 @@ def append(root, kind, data, session=''):
     """Append one record. Callers must hold the store writer lock (runtime.opened)."""
     if not isinstance(kind, str) or not kind:
         raise ValueError('Ledger record needs a kind')
+    if kind in ('prompt', 'assistant', 'tool') and not isinstance(data, dict):
+        raise ValueError(kind + ' ledger event data must be a JSON object')
     path = raw_root(root) / LEDGER
     try:
         existing = verified_records(root)  # Chain AND consolidated checkpoint, exactly like verify (#53).

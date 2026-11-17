@@ -71,6 +71,49 @@ class GlobalInstallTests(unittest.TestCase):
         self.assertFalse((self.profile / '.codex/AGENTS.md').exists())
         self.assertFalse(self.home.exists())
 
+    def test_reinstall_preserves_custom_worker_and_mode_switch_retains_options(self):
+        self.run_install()
+        path = self.home / 'framework/memory-config.json'
+        custom = {'dream_every': 47, 'dream_agent': 'codex', 'dream_command': [sys.executable, '-c', 'pass']}
+        config = json.loads(path.read_bytes())
+        config['ledger'].update(custom)
+        path.write_text(json.dumps(config), encoding='utf-8')
+        for mode in ('background', 'foreground', 'background'):
+            self.run_install('--mode', mode)
+            ledger = json.loads(path.read_bytes())['ledger']
+            self.assertEqual({key: ledger[key] for key in custom}, custom)
+            self.assertEqual(ledger['enabled'], mode == 'background')
+            self.assertEqual(ledger['foreground_writes'], mode == 'foreground')
+
+    def test_uninstall_old_home_preserves_new_home_host_files(self):
+        old = self.home
+        self.run_install()
+        self.home = self.base / 'new global home'
+        self.run_install()
+        targets = [self.profile / name for name in ('.codex/AGENTS.md', '.codex/config.toml', '.claude/settings.json')]
+        before = [target.read_bytes() for target in targets]
+        current = self.home
+        self.home = old
+        self.run_install('--uninstall')
+        self.assertEqual([target.read_bytes() for target in targets], before)
+        self.home = current
+        self.run_install('--uninstall')
+        self.assertNotIn(START, targets[0].read_bytes())
+        self.assertNotIn(b'notify', targets[1].read_bytes())
+        self.assertNotIn('hooks', json.loads(targets[2].read_bytes()))
+
+    def test_codex_install_and_uninstall_preserve_multiline_toml_text_and_tables(self):
+        target = self.profile / '.codex/config.toml'
+        script = (self.home.resolve() / 'framework/tools/codex_notify.py').as_posix()
+        example = 'notify = ' + json.dumps([Path(sys.executable).as_posix(), script])
+        body = (f'developer_instructions = """\n[ignored]\n{example}\n"""\n'
+                f"example = '''\n{example}\n'''\n[profiles.qa]\n{example}\n").encode()
+        self.write_config(target, body)
+        self.run_install('--agent', 'codex')
+        self.assertEqual(target.read_bytes(), example.encode() + b'\n' + body)
+        self.run_install('--agent', 'codex', '--uninstall')
+        self.assertEqual(target.read_bytes(), body)
+
     def test_install_both_with_stable_absolute_paths_and_generic_export(self):
         self.run_install()
         # Claude gets rules from the global hooks; no CLAUDE.md is written.
