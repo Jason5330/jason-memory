@@ -40,9 +40,10 @@ SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --
 `token_count`、`tokenizer` 等一般計量欄位保留（#43）。
 純文字中也會遮蔽：`Authorization`／`Proxy-Authorization` 標頭與 `Bearer` 值、`api_key=`、`GITHUB_TOKEN=`、
 `password:` 等「憑證名稱＋`=`或`:`」後的值、`--password` 類參數、`Cookie`／`Set-Cookie` 的值、網址中的密碼
-（`https://user:密碼@host`）與整段私鑰（#50）。環境變數引用（`${TOKEN}`）保留。
+（`https://user:密碼@host`）與整段私鑰（#50）。值若用引號包住，整段引號內容都遮蔽（含空格與跳脫引號，#54）。
+環境變數引用（`${TOKEN}`）保留。
 
-雜湊鏈驗證不通過時，`append`、`mirror` 一律拒絕寫入，帳本保持原狀供診斷；Claude hook 只顯示警告、不阻擋對話（#51）。
+雜湊鏈或已整理游標的 checkpoint 驗證不通過時（含截短、重新計算雜湊的改寫，#53），`append`、`mirror` 一律拒絕寫入，帳本保持原狀供診斷；Claude hook 只顯示警告、不阻擋對話（#51）。
 
 ## 各 kind 的 data
 

@@ -117,29 +117,46 @@ def secret_values(text):
 # conservative secret_values() check.
 _NAME = (r'(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|'
          r'private[_-]?key|credentials?|session[_-]?id|sid)')
+# A secret value is either quoted - then the WHOLE quoted text, spaces included (#54) - or one bare token.
+_VALUE = r'(?:"(?P<dq>(?:[^"\\\n]|\\.)*)"|\'(?P<sq>(?:[^\'\\\n]|\\.)*)\'|(?P<value>[^\s"\'&;,<>]{3,}))'
 _ASSIGNED = re.compile(
-    r'(?i)(?<![A-Za-z0-9])(?P<name>(?:[A-Za-z0-9]+[_.-])*' + _NAME + r')(?![A-Za-z0-9])["\']?\s*(?:=|:)\s*["\']?'
-    r'(?P<value>[^\s"\'&;,<>]{3,})')
+    r'(?i)(?<![A-Za-z0-9])(?P<name>(?:[A-Za-z0-9]+[_.-])*' + _NAME + r')(?![A-Za-z0-9])["\']?\s*(?:=|:)\s*' + _VALUE)
 _FLAG = re.compile(r'(?i)(?<![A-Za-z0-9-])--?(?:password|passwd|pass|token|api-?key|secret|client-secret)'
-                   r'(?:=|\s+)["\']?(?P<value>[^\s"\']{3,})')
+                   r'(?:=|\s+)' + _VALUE)
+_QUOTED_AUTH = re.compile(r'(?i)\b(?:proxy-)?authorization\b["\']?\s*[:=]\s*(?:"(?P<dq>[^"\n]*)"|\'(?P<sq>[^\'\n]*)\')')
+_SCHEME = re.compile(r'(?i)^(\s*(?:basic|bearer|token|negotiate|digest|apikey|api-key|key)\s+)?.*$', re.S)
 _COOKIE_LINE = re.compile(r'(?im)^(?P<head>[^\S\n]*(?:set-)?cookie\s*:)(?P<body>[^\n]*)$')
 _COOKIE_VALUE = re.compile(r'=(?P<value>[^;\s]+)')
 _USERINFO = re.compile(r'(?i)\b(?P<head>[a-z][a-z0-9+.-]*://[^/\s:@]+):(?P<value>[^@\s/]+)@')
 _PRIVATE_BLOCK = re.compile(r'(-----BEGIN (?P<kind>[A-Z ]*)PRIVATE KEY-----).*?(-----END (?P=kind)PRIVATE KEY-----|\Z)', re.S)
 
 
+def _mask_value(match, keep=None):
+    """Replace only the value group of a match; quotes and surrounding text stay."""
+    group = next(g for g in ('dq', 'sq', 'value') if match.group(g) is not None)
+    value = match.group(group)
+    if keep is not None and keep(value):
+        return match.group(0)
+    start, end = match.start(group) - match.start(), match.end(group) - match.start()
+    return match.group(0)[:start] + '[REDACTED]' + match.group(0)[end:]
+
+
+def _not_a_credential(value):
+    stripped = value.strip()
+    return (not stripped or stripped == '[REDACTED]' or stripped.startswith(('$', '%'))
+            or re.fullmatch(r'\d{1,4}', stripped) is not None)  # Env references and small counts.
+
+
 def redact(text):
-    """Mask credential values before anything reaches the raw ledger (#38, #43, #50)."""
+    """Mask credential values before anything reaches the raw ledger (#38, #43, #50, #54)."""
     text = _PRIVATE_BLOCK.sub('[REDACTED PRIVATE KEY]', text)
     for value in secret_values(text):
         text = text.replace(value, '[REDACTED]')
+    text = _QUOTED_AUTH.sub(lambda m: m.group(0)[:m.start('dq' if m.group('dq') is not None else 'sq') - m.start()]
+                            + _SCHEME.sub(lambda s: (s.group(1) or '') + '[REDACTED]',
+                                          m.group('dq') if m.group('dq') is not None else m.group('sq'))
+                            + m.group(0)[-1], text)
     text = _COOKIE_LINE.sub(lambda m: m.group('head') + _COOKIE_VALUE.sub('=[REDACTED]', m.group('body')), text)
     text = _USERINFO.sub(lambda m: m.group('head') + ':[REDACTED]@', text)
-    text = _FLAG.sub(lambda m: m.group(0).replace(m.group('value'), '[REDACTED]'), text)
-
-    def assigned(match):
-        value = match.group('value')
-        if value.startswith(('$', '%', '[REDACTED]')) or re.fullmatch(r'\d{1,4}', value):
-            return match.group(0)  # Env references and small counts are not credentials.
-        return match.group(0)[:match.start('value') - match.start()] + '[REDACTED]'
-    return _ASSIGNED.sub(assigned, text)
+    text = _FLAG.sub(lambda m: _mask_value(m, _not_a_credential), text)
+    return _ASSIGNED.sub(lambda m: _mask_value(m, _not_a_credential), text)

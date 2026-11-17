@@ -499,7 +499,10 @@ WHY_LINE = re.compile(r'^Why: .*$', re.M)
 
 # Text cited as a ledger source (`ledger X:N:Y`, `來源：ledger ...`): validated even when its store
 # or hash part is malformed - 5 characters, non-hex - so a bad citation cannot slip past (#52).
-EXPLICIT_REF = re.compile(r'(?i)\bledger\s+`?([^\s`，。、；;,()（）]+:[^\s`，。、；;,()（）]+:[^\s`，。、；;,()（）]+)')
+_REF_PART = r'[^\s`*_<>\[\]()（）"\'「」【】《》，。、；;,:：|!?！？]+'
+# Markdown and quote wrappers (`**`, `*`, `_`, backticks, <>, quotes, 「」【】) are not part of the
+# reference: a valid one wrapped in them is accepted, an invalid one still fails (#55).
+EXPLICIT_REF = re.compile(r'(?i)\bledger\s+[`*_<\["\'「【《]*(' + _REF_PART + ':' + _REF_PART + ':' + _REF_PART + ')')
 LOOSE_REF = re.compile(r'(?<![0-9A-Za-z_])(?:local|[0-9a-f]{8,32}):\d+:[0-9A-Za-z]+(?![0-9A-Za-z_])', re.I)
 
 

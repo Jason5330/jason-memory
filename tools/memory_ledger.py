@@ -161,9 +161,8 @@ def append(root, kind, data, session=''):
     if not isinstance(kind, str) or not kind:
         raise ValueError('Ledger record needs a kind')
     path = raw_root(root) / LEDGER
-    existing = records(root)
     try:
-        verify_chain(existing)
+        existing = verified_records(root)  # Chain AND consolidated checkpoint, exactly like verify (#53).
     except ValueError as exc:
         # A record appended after a broken link could never be replayed (#51). Keep the file as is
         # for diagnosis and report that this event was not stored.
@@ -197,7 +196,7 @@ def mirror(root, source, session=''):
     source = Path(source).resolve(strict=True)
     if not source.is_file():
         raise ValueError('mirror needs a regular file')
-    verify_chain(records(root))  # Refuse before writing a blob that no record could reference (#51).
+    verified_records(root)  # Refuse before writing a blob that no record could reference (#51, #53).
     content = source.read_bytes()
     if len(content) > runtime.MAX_BYTES:
         raise ValueError('Document exceeds mirror limit')

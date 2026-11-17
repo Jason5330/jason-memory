@@ -126,7 +126,16 @@ class GlobalQAMatrix(unittest.TestCase):
             'store local': 'local:' + seq + ':' + digest,
         }
         contexts = {'plain': '來源：ledger {}', 'english': 'Source: ledger {}', 'inline code': '來源：ledger `{}`',
-                    'full stop': '來源：ledger {}。', 'parenthesis': '（來源：ledger {}）', 'no ledger word': '來源：{}'}
+                    'full stop': '來源：ledger {}。', 'parenthesis': '（來源：ledger {}）', 'no ledger word': '來源：{}',
+                    # Markdown and quoting around the reference (#55): valid must pass, invalid must fail.
+                    'bold': '來源：ledger **{}**', 'italic': 'Source: ledger *{}*', 'underscore': 'Source: ledger _{}_',
+                    'link label': 'Source: [ledger {}](https://example.invalid/evidence)',
+                    'angle brackets': 'Source: ledger <{}>', 'double quotes': '來源：ledger "{}"',
+                    'single quotes': "來源：ledger '{}'", 'corner brackets': '來源：ledger 「{}」',
+                    'lenticular brackets': '來源：ledger 【{}】', 'bold code': '來源：ledger **`{}`**',
+                    'no ledger word bold': '來源：**{}**',
+                    'trailing colon': '來源：ledger {}: 使用者要求', 'fullwidth colon': '來源：ledger {}：使用者要求',
+                    'table cell': '| 來源 | ledger {} |', 'exclamation': 'Source: ledger {}!'}
         shared = self.home / 'memory/shared'
         # Positive controls: a valid reference is accepted in every context.
         for label, template in contexts.items():
@@ -136,7 +145,7 @@ class GlobalQAMatrix(unittest.TestCase):
         number = 0
         for variant, ref in bad.items():
             for label, template in contexts.items():
-                if label == 'no ledger word' and variant == 'store non-hex':
+                if label.startswith('no ledger word') and variant == 'store non-hex':
                     continue  # Without the word `ledger`, `zzzz…:1:…` is not presented as a ledger source.
                 number += 1
                 with self.subTest(entry='remember new', variant=variant, context=label):
@@ -203,6 +212,17 @@ class GlobalQAMatrix(unittest.TestCase):
             'client secret': ('client_secret={}', letters + 'o'),
             'x-api-key header': ('X-Api-Key: {}', letters + 'p'),
             'private key': ('-----BEGIN RSA PRIVATE KEY-----\n{}\n-----END RSA PRIVATE KEY-----', 'MIIEowIBAAKCAQEA' + letters),
+            # Quoted values containing spaces must be masked whole (#54).
+            'quoted spaces assign': ('password="{}" QA_AFTER_QUOTE_77', 'qaprefixalpha qaprivatetailone'),
+            'quoted spaces flag': ('mysql --password "{}" -u qa', 'qaprefixbeta qaprivatetailtwo'),
+            'single quoted colon': ("password: '{}'", 'qaprefixgamma qaprivatetailthree'),
+            'json quoted spaces': ('{{"password": "{}", "user": "QA_USER_88"}}', 'qaprefixdelta qaprivatetailfour'),
+            'env quoted spaces': ('API_KEY="{}" make deploy', 'qaprefixepsilon qaprivatetailfive'),
+            'spaced equals': ('client_secret = "{}"', 'qaprefixzeta qaprivatetailsix'),
+            'flag equals quoted': ('--token="{}"', 'qaprefixeta qaprivatetailseven'),
+            'auth header quoted': ('Authorization: "Bearer {}"', 'qaprefixtheta qaprivatetaileight'),
+            'escaped quote inside': ('password="{}" QA_AFTER_ESCAPE_91', 'qaprefixiota \\"qaprivatemiddle\\" qaprivatetailnine'),
+            'powershell env': ('$env:API_KEY = "{}"', 'qaprefixkappa qaprivatetailten'),
         }
         stdout = 'QA_METRIC=17\n' + '\n'.join(t.format(v) for t, v in cases.values())
         # Ordinary output next to a credential must survive (found in a real Claude Code run).
@@ -224,16 +244,32 @@ class GlobalQAMatrix(unittest.TestCase):
             self.assertIn('QA_METRIC=17', text if view != 'source prompt' else 'QA_METRIC=17', view)
             for label, secret in zip(list(cases) + ['struct header', 'struct env', 'prompt bearer', 'struct number'], secrets):
                 with self.subTest(view=view, case=label):
-                    self.assertNotIn(secret, text)
+                    for part in [secret] + [p for p in secret.split() if len(p) >= 8]:
+                        self.assertNotIn(part, text)  # Every word of a multi-word secret, not just the start.
         replay = views['replay']
         self.assertIn('QA_REQ_42', replay)
         self.assertIn('QA_KEEP_MARKER_8842', replay)
+        self.assertIn('QA_AFTER_QUOTE_77', replay)
+        self.assertIn('QA_AFTER_ESCAPE_91', replay)
+        self.assertIn('QA_USER_88', replay)
+        self.assertIn('make deploy', replay)
         self.assertIn('data_2024.csv', replay)
         self.assertNotIn(letters + 't', replay)
         self.assertIn('"input_tokens": 12', replay)
 
     # --- invariant 3: nothing is accepted or reported as fine on a ledger that fails verify ----
     def test_corrupt_ledger_is_never_extended_or_reported_as_valid(self):
+        def rehashed(lines):
+            records, previous, output = [json.loads(line) for line in lines], '0' * 64, []
+            records[1]['data']['text'] = 'QA-REWRITTEN-2'
+            for record in records:
+                record['prev'] = previous
+                body = {k: v for k, v in record.items() if k != 'hash'}
+                record['hash'] = hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode('utf-8')).hexdigest()
+                previous = record['hash']
+                output.append((json.dumps(record, ensure_ascii=False, sort_keys=True) + '\n').encode('utf-8'))
+            return output
+
         def corruptions(lines):
             yield 'edited data', [lines[0].replace(b'QA-ORIGINAL-1', b'QA-MODIFIED-1')] + lines[1:]
             yield 'deleted middle', lines[:1] + lines[2:]
@@ -241,14 +277,22 @@ class GlobalQAMatrix(unittest.TestCase):
             yield 'torn last line', lines[:-1] + [lines[-1][:len(lines[-1]) // 2]]
             yield 'garbage line', lines + [b'not json\n']
             yield 'non-object line', lines + [b'[1, 2]\n']
+            # Every remaining line is valid, but the consolidated checkpoint says 3 records existed (#53).
+            yield 'truncated below cursor', lines[:2]
+            # A consistent re-hashed rewrite: the chain verifies, only the checkpoint can tell (#40, #53).
+            yield 'rehashed rewrite below cursor', rehashed(lines)
         template = None
-        for label, broken in corruptions(self.seed_lines()):
+        seed = self.seed_lines()
+        checkpoint = json.dumps({'cursor': 3, 'cursor_hash': json.loads(seed[2])['hash']})
+        for label, broken in corruptions(seed):
             folder = self.project('broken-' + label.replace(' ', '-'))
             ledger_file = self.store(folder) / '.raw/ledger.jsonl'
             if template is None:
                 template = self.append(folder, 'prompt', {'text': 'warm-up'})
             ledger_file.parent.mkdir(parents=True, exist_ok=True)
             ledger_file.write_bytes(b''.join(broken))
+            if label in ('truncated below cursor', 'rehashed rewrite below cursor'):
+                (ledger_file.parent / 'dream.json').write_text(checkpoint, encoding='utf-8')
             before = ledger_file.read_bytes()
             ref = self.store_id(folder) + ':1:' + '0' * 12
             document = folder / 'doc.txt'
