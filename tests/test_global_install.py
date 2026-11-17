@@ -104,7 +104,7 @@ class GlobalInstallTests(unittest.TestCase):
 
     def test_codex_install_and_uninstall_preserve_multiline_toml_text_and_tables(self):
         target = self.profile / '.codex/config.toml'
-        script = (self.home / 'framework/tools/codex_notify.py').as_posix()
+        script = (self.home.resolve() / 'framework/tools/codex_notify.py').as_posix()
         example = 'notify = ' + json.dumps([Path(sys.executable).as_posix(), script])
         body = (f'developer_instructions = """\n[ignored]\n{example}\n"""\n'
                 f"example = '''\n{example}\n'''\n[profiles.qa]\n{example}\n").encode()

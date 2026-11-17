@@ -36,7 +36,7 @@
     "tests/test_download.py": "9649e5b2eb89ec697a8455ee069dc60727a940287c325a62c5ede9545e49f4ba",
     "tests/test_global_background.py": "72318abc1b2493ae4f7b4ca78c003b5e13627927791941ed10d9183058b66ecf",
     "tests/test_global_download.py": "369d0cca375465d69bac9287486a9715eabd680f641af7dc2bb9686d86b85ded",
-    "tests/test_global_install.py": "a132f92c2efdc24f1598d0b1fc280b9de46c7d5a8803bfe668b0606a75bd3ea1",
+    "tests/test_global_install.py": "99251fc0f0602afd33c7142c78c8c06221b1bb5ad0d954c304092d145da778e5",
     "tests/test_global_store.py": "b1446b7a73ef76341e0961e6bdbdca3cdecebb83584ce40b4acce5d3b945e608",
     "tests/test_install.py": "5b468fd134d0e22dcb56a06b1abcebc54c6cc3abd2b392ce490f2a389a6c003a",
     "tests/test_ledger.py": "1c8fbd7688a46587620f1b08b669b195c820d4e887c672e76d3c464206482973",
