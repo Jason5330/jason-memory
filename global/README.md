@@ -147,6 +147,7 @@ python ~/.jason-memory-global/framework/tools/memory_runtime.py --config ~/.jaso
 ## 更新與卸載
 
 重新執行安裝會更新框架及同一段入口，不重複新增、不覆寫記憶。
+重新安裝會保留 `dream_every`、`dream_agent`、`dream_command` 等背景整理設定。
 升級此版請重新執行 `INSTALL.cmd`，再重新啟動 Claude Code 工作階段。
 本版會一併更新保存證據檢查：成功宣告需要本輪工具收據與實際筆記吻合；
 已存在的偏好只驗證、不重寫。沒有證據時要求補寫或更正，重試失敗明確警告。
@@ -161,6 +162,7 @@ python global/install.py --agent both --uninstall
 
 若曾指定自訂 `--home` 或 AI 設定目錄，卸載時也帶上相同選項。
 卸載只移除所選 AI 設定中的管理區塊，**保留全部記憶、框架及備份**。
+切換全局記憶目錄後，可用 `--home` 指定舊安裝以卸載其入口。這會保留指向目前目錄的設定。
 其他 AI 手動貼上的通用入口需自行移除；`GENERIC_INSTRUCTIONS.md` 也會保留。
 
 本 ZIP 僅含白名單框架檔案、空白索引範本及授權；不含私人筆記、帳號設定、

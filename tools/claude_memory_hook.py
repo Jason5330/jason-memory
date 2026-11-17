@@ -307,7 +307,8 @@ def handle(event, config):
     if cfg['mode'] == 'project' and local and Path(config).resolve().parent != local:
         raise ValueError('Hook config disagrees with nearest project memory config')
     session = hashlib.sha256(str(event.get('session_id', 'unknown')).encode()).hexdigest()
-    if cfg['mode'] == 'global':
+    if cfg['mode'] == 'global' and (name != 'SessionStart' or event.get('source') == 'compact'):
+        # Resume/start identify the active workspace. Keep the saved root for events within it.
         saved_path = runtime.storelib.safe(initial_roots['global'] / '.hook-state' / (session + '.json'),
                                            initial_roots['global'])
         if saved_path.exists():

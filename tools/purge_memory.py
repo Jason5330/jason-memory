@@ -134,29 +134,30 @@ class Plan:
                 path.rmdir()
 
 
-def clean_settings(plan, target):
+def clean_settings(plan, target, owned_script=None):
     target = safe(target)
     if not target.exists():
         return
     original = target.read_bytes()
-    updated = hook_settings.merged(original)
+    updated = hook_settings.merged(original, owned_script=owned_script)
     # Avoid touching/reformatting settings which have no owned hooks.
     if json.loads(original.decode('utf-8-sig').strip() or '{}') != json.loads(updated):
         plan.file(target, updated if json.loads(updated) else None)
 
 
-def clean_rules(plan, target):
+def clean_rules(plan, target, owned_home=None):
     target = safe(target)
     if target.is_file():
         data = target.read_bytes()
         updated = strip_block(data)
+        owner = (hook_settings.managed_home(data[data.index(START):data.index(END)]) if START in data else None)
+        if owned_home is not None and owner is not None and safe(owner) != owned_home:
+            return []
         if updated != data:
             plan.file(target, updated if updated.strip(b'\xef\xbb\xbf\r\n\t ') else None)
         # Discover custom global homes only from a validated managed block.
-        if START in data:
-            block = data[data.index(START):data.index(END)]
-            return [Path(json.loads(match)) for match in re.findall(
-                rb'"memory_home"\s*:\s*("(?:[^"\\]|\\.)*")', block)]
+        if owner is not None:
+            return [owner]
     return []
 
 
@@ -280,14 +281,17 @@ def make_plan(args):
     claude = safe(args.claude_home or (None if args.user_home else os.environ.get('CLAUDE_CONFIG_DIR'))
                   or profile / '.claude')
     plan = Plan()
-    homes = {safe(args.home or profile / '.jason-memory-global')}
+    explicit_home = safe(args.home) if args.home else None
+    homes = {explicit_home or safe(profile / '.jason-memory-global')}
     for directory, names in ((codex, ('AGENTS.md', 'AGENTS.override.md')),
                              (claude, ('CLAUDE.md',))):
         for name in names:
-            homes.update(safe(p) for p in clean_rules(plan, directory / name))
-        clean_backups(plan, directory, names + ('settings.json',))
-    clean_settings(plan, claude / 'settings.json')
-    clean_settings(plan, claude / 'settings.local.json')
+            homes.update(safe(p) for p in clean_rules(plan, directory / name, explicit_home))
+        if explicit_home is None:
+            clean_backups(plan, directory, names + ('settings.json',))
+    owned_script = explicit_home / 'framework/tools/claude_memory_hook.py' if explicit_home is not None else None
+    clean_settings(plan, claude / 'settings.json', owned_script)
+    clean_settings(plan, claude / 'settings.local.json', owned_script)
     protected = {root, profile, codex, claude, Path(root.anchor)}
     for home in homes:
         if any(home == p or home in p.parents or p in home.parents and p in (codex, claude)

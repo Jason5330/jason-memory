@@ -68,7 +68,10 @@ def render_record(record, store='local'):
     def clip(text, limit):
         return text if len(text) <= limit else text[:limit - len(truncated)] + truncated
 
-    if record.get('kind') == 'prompt':
+    if not isinstance(data, dict):
+        # Previous releases accepted non-object payloads; keep replaying the old chain.
+        text = record.get('kind', '') + '：' + json.dumps(data, ensure_ascii=False)
+    elif record.get('kind') == 'prompt':
         text = '使用者：' + str((data or {}).get('text', ''))
     elif record.get('kind') == 'assistant':
         text = '助理：' + str((data or {}).get('text', ''))

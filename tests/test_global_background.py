@@ -114,6 +114,36 @@ class GlobalBackgroundModeTests(unittest.TestCase):
         self.assertIn((self.home / "framework/tools/codex_notify.py").as_posix(), data)
         self.assertNotIn("project A", data)
 
+    def test_resume_uses_new_workspace_without_moving_nested_tool_events(self):
+        self.install()
+        a, b = self.base / 'workspace a', self.base / 'workspace b'
+        nested = a / 'subfolder'
+        nested.mkdir(parents=True)
+        b.mkdir()
+        config = self.home / 'framework/memory-config.json'
+        tools = config.parent / 'tools'
+        self.env['JASON_DREAM'] = '1'
+        for project, value in ((a, 'QA-PRIVATE-ALPHA'), (b, 'QA-PRIVATE-BETA')):
+            self.run_py(tools / 'memory_runtime.py', '--config', config, '--project', project,
+                        'remember', '--scope', 'project', '--subject', 'qa', '--key', 'setting',
+                        '--value', value, '--why', 'Synthetic test')
+        self.env.pop('JASON_DREAM')
+
+        def event(project, name, **data):
+            payload = dict(data, cwd=str(project), session_id='qa-resume', hook_event_name=name)
+            return self.run_py(tools / 'claude_memory_hook.py', '--config', config, '--jason-hook',
+                               stdin=json.dumps(payload)).stdout
+
+        self.assertIn('QA-PRIVATE-ALPHA', event(a, 'SessionStart', source='startup'))
+        event(nested, 'UserPromptSubmit', prompt='QA-ORIGINAL-WORKSPACE')
+        resumed = event(b, 'SessionStart', source='resume')
+        self.assertIn('QA-PRIVATE-BETA', resumed)
+        self.assertNotIn('QA-PRIVATE-ALPHA', resumed)
+        event(b, 'UserPromptSubmit', prompt='QA-RESUMED-WORKSPACE')
+        for project, marker in ((a, 'QA-ORIGINAL-WORKSPACE'), (b, 'QA-RESUMED-WORKSPACE')):
+            replay = self.run_py(tools / 'memory_ledger.py', '--config', config, '--project', project, 'replay')
+            self.assertEqual([record['data']['text'] for record in json.loads(replay.stdout)], [marker])
+
     def test_shared_note_source_resolves_to_the_right_project_ledger(self):
         """#30: both projects have a seq 1; a reference still finds B's record from A."""
         self.install()

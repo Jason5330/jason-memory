@@ -1,17 +1,50 @@
 """Merge only owned Claude hook commands, preserving unrelated configuration."""
 import copy
 import json
+import os as _os
+from pathlib import Path as _Path
+import re as _re
+import shlex
 
 TOOL_EVENTS = ('PostToolUse', 'PostToolUseFailure')
 EVENTS = ('SessionStart', 'UserPromptSubmit', 'PreToolUse', *TOOL_EVENTS, 'Stop')
 MARKER = '--jason-hook'
 
 
-def merged(original, command=None):
-    data = json.loads(original.decode('utf-8-sig')) if original.strip() else {}
-    if not isinstance(data, dict) or not isinstance(data.get('hooks', {}), dict):
+def managed_home(block):
+    # Both generated Markdown variants contain one JSON block with a memory_home field.
+    _, found, remainder = block.replace(b'\r\n', b'\n').partition(b'```json\n')
+    if not found:
+        return None  # Legacy blocks without a recorded home.
+    encoded, closing, _ = remainder.partition(b'\n```')
+    values = json.loads(encoded) if closing else {}
+    if not isinstance(values, dict) or not isinstance(values.get('memory_home'), str):
+        raise ValueError('Invalid Jason-memory managed home; cannot determine ownership')
+    path = _Path(values['memory_home'])
+    if not path.is_absolute():
+        raise ValueError('Invalid Jason-memory managed home; expected an absolute path')
+    return path
+
+
+def _is_managed_hook(hook, owned_script):
+    command = hook.get('command') if isinstance(hook, dict) else None
+    if not isinstance(command, str) or MARKER not in command or 'claude_memory_hook.py' not in command:
+        return False
+    if owned_script is None:
+        return True
+    try:
+        args = shlex.split(command)
+        config_argument = args.index('--config')
+        return config_argument > 0 and _same(args[config_argument - 1], owned_script)
+    except ValueError:
+        return False
+
+
+def merged(original, command=None, *, owned_script=None):
+    previous = json.loads(original.decode('utf-8-sig')) if original.strip() else {}
+    if not isinstance(previous, dict) or not isinstance(previous.get('hooks', {}), dict):
         raise ValueError('Claude settings/hooks must be JSON objects')
-    data = copy.deepcopy(data)
+    data = copy.deepcopy(previous)
     hooks = data.setdefault('hooks', {})
     for name in EVENTS:
         rows = hooks.get(name, [])
@@ -22,8 +55,7 @@ def merged(original, command=None):
             if not isinstance(row, dict) or not isinstance(row.get('hooks'), list):
                 raise ValueError('Invalid Claude hook group')
             group = dict(row)
-            group['hooks'] = [h for h in row['hooks'] if not (isinstance(h, dict) and
-                              MARKER in h.get('command', '') and 'claude_memory_hook.py' in h.get('command', ''))]
+            group['hooks'] = [h for h in row['hooks'] if not _is_managed_hook(h, owned_script)]
             if group['hooks']:
                 retained.append(group)
         if command:
@@ -39,17 +71,45 @@ def merged(original, command=None):
             hooks.pop(name, None)
     if not hooks:
         data.pop('hooks', None)
+    if owned_script is not None and data == previous:
+        return original
     return (json.dumps(data, ensure_ascii=False, indent=2) + '\n').encode('utf-8')
 
 
 # --- Codex notify (shared by the project/global installers and the purge tool) --
-import os as _os
-import re as _re
-from pathlib import Path as _Path
 
 # Single-line `notify = [...]` arrays that mention codex_notify.py (the only form we ever write).
-NOTIFY_LINE = _re.compile(rb'^[ \t]*notify[ \t]*=[ \t]*(\[[^\r\n]*codex_notify\.py[^\r\n]*\])[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)', _re.M)
-ANY_NOTIFY = _re.compile(rb'^[ \t]*notify[ \t]*=', _re.M)
+NOTIFY_KEY = rb"""^[ \t]*(?:notify|"notify"|'notify')[ \t]*="""
+NOTIFY_LINE = _re.compile(NOTIFY_KEY + rb'[ \t]*(\[[^\r\n]*codex_notify\.py[^\r\n]*\])[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)')
+ANY_NOTIFY = _re.compile(NOTIFY_KEY)
+TOML_TEXT = _re.compile(
+    rb'#[^\r\n]*'
+    rb'|"""(?:\\[\s\S]|""?(?!")|[^"\\])*"{3,5}'
+    rb"|'''(?:''?(?!')|[^'])*'{3,5}"
+    rb'|"(?:\\[^\r\n]|[^"\\\r\n])*"'
+    rb"|'[^'\r\n]*'"
+)
+
+
+def _notify_lines(body):
+    """Find top-level notify assignments while leaving strings, tables and array contents alone."""
+    syntax = TOML_TEXT.sub(lambda found: _re.sub(rb'[^\r\n]', b' ', found.group()), body)
+    position, nesting = 0, 0
+    for row in syntax.splitlines(keepends=True):
+        end = position + len(row)
+        if nesting == 0 and row.lstrip().startswith(b'['):
+            break  # A TOML table ends the top-level assignments.
+        original = body[position:end]
+        if nesting == 0 and b'=' in row and ANY_NOTIFY.match(original):
+            yield position, original
+        nesting += row.count(b'[') + row.count(b'{') - row.count(b']') - row.count(b'}')
+        position = end
+
+
+def _without_lines(body, lines):
+    for position, row in reversed(lines):
+        body = body[:position] + body[position + len(row):]
+    return body
 
 
 def notify_script(array):
@@ -76,15 +136,16 @@ def is_jason_dispatcher(path):
 
 def strip_notify(body, owned):
     """Remove notify lines whose script is exactly one of `owned`. Returns (body, removed paths)."""
-    removed = []
-
-    def drop(match):
+    removed, lines = [], []
+    for position, row in _notify_lines(body):
+        match = NOTIFY_LINE.match(row)
+        if match is None:
+            continue
         script = notify_script(match.group(1))
         if script is not None and any(_same(script, path) for path in owned):
             removed.append(script)
-            return b''
-        return match.group(0)
-    return NOTIFY_LINE.sub(drop, body), removed
+            lines.append((position, row))
+    return _without_lines(body, lines), removed
 
 
 def merged_notify(original, python, script, uninstall=False, takeover=False):
@@ -100,17 +161,22 @@ def merged_notify(original, python, script, uninstall=False, takeover=False):
         if removed:
             return bom + body, 'removed'
         return original, ('kept: notify belongs to another program or installation'
-                          if ANY_NOTIFY.search(body) else 'absent')
-    for match in list(NOTIFY_LINE.finditer(body)):
+                          if next(_notify_lines(body), None) is not None else 'absent')
+    stale = []
+    for position, row in _notify_lines(body):
+        match = NOTIFY_LINE.match(row)
+        if match is None:
+            continue
         other = notify_script(match.group(1))
         if other is None:
             continue
         if not other.is_file() or (takeover and is_jason_dispatcher(other)):
-            body = body.replace(match.group(0), b'', 1)  # Stale, or handed over to the global dispatcher.
+            stale.append((position, row))  # Stale, or handed over to the global dispatcher.
         elif is_jason_dispatcher(other):
             return original, ('shared: Codex turns are recorded by another Jason-memory installation ('
                               + str(other) + ')')
-    if ANY_NOTIFY.search(body):
+    body = _without_lines(body, stale)
+    if next(_notify_lines(body), None) is not None:
         return original, ('skipped: another Codex notify program is configured, so Codex turns are NOT '
                           'recorded; call ' + _Path(script).as_posix() + ' from it with the same JSON argument')
     line = ('notify = ' + json.dumps([_Path(python).as_posix(), _Path(script).as_posix()],

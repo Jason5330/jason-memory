@@ -45,6 +45,7 @@ UNINSTALL.bat --home "D:\SharedMemory" --project "D:\MyProject"
 
 `--project` 指定的資料夾須包含對應套件 manifest 才能清除框架原始檔。
 自訂全局目錄須有框架的安裝識別設定，不能用此工具刪除任意資料夾。
+指定 `--home` 時只清除該全局記憶庫及其宿主入口。省略時會自動偵測全局入口所記錄的自訂目錄。
 `--user-home` 可指定隔離使用者目錄並忽略宿主環境變數，供測試使用；
 `--codex-home`、`--claude-home` 可另外指定 AI 設定目錄。
 
