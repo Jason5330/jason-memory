@@ -12,7 +12,7 @@
     "SKILL.md": "3e1736f654da3a7a4bf459f1d8f61977849f1459ea19e993864748093af97d00",
     "START_HERE.md": "4f7d91543160f1df50ebd9c34a37be2ffd78b71b84ac1d4eeabc0e29391e2df0",
     "UNINSTALL.bat": "032d73ed9d90feafb5b7b9c153d902fa7af5d57d65f6de23a66bd4ce49e4b35f",
-    "docs/ledger-format.md": "91d601978c50be371d11c0a48c9e3e890cb5586e9d1dcac87a672fd310680ea9",
+    "docs/ledger-format.md": "85a8ddf1c8d54357d63b3f227acf5587b1e034b690a9352746771d68d941dd46",
     "docs/memory-runtime.md": "2c2f9783c74cb292e4c86535198ce0e9b01baebeb4031c5fe9c71b03b004926a",
     "docs/superpowers/plans/2026-09-17-global-memory.md": "87740d1fdee4127d274a7fbeb11a999b367701b6e28ed3fd2b4f2779176b8bcb",
     "docs/uninstall.md": "2c6655043ef5102625ad2bd1b447e52373bb0d63d219a0715749ae9aacbeefd5",
@@ -52,7 +52,7 @@
     "tools/jason_check.py": "3fcc5e6e66020533558a12418a3733efc25a46e895e68ce127d39607398e10be",
     "tools/jason_doctor.py": "3969505d9da9e7bf183d0e60e0be886fea40ecfa1eff157b4eb41a889c5134e4",
     "tools/memory_dream.py": "1315049f40f34e77d7c82a06edc361c53d3a801f5590ff761337b9e951c55740",
-    "tools/memory_facts.py": "7bfb55d3033fcc0589c58584eee7739fbd8f323a968f64396520947f81f30d77",
+    "tools/memory_facts.py": "9ed237a31edab46cc051335862e109479555f449ad047e43139f18d016169dad",
     "tools/memory_ledger.py": "21fc427a95ab51270ee87ce0d6b87e3db659567a4ff6ae4336506ab6b9b5b439",
     "tools/memory_runtime.py": "13d76fca6e55f1a047082e831e6c3778f4a14c5c31c44d359eb1648f21d09230",
     "tools/purge_memory.py": "fc072d6a405a923cdc4fa222ce71ac9e9c26f8e073f53911ff415d96e9280a67"
