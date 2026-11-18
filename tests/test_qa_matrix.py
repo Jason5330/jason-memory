@@ -257,6 +257,51 @@ class GlobalQAMatrix(unittest.TestCase):
         self.assertNotIn(letters + 't', replay)
         self.assertIn('"input_tokens": 12', replay)
 
+    # --- invariant 2b: ordinary values next to credential-like names are never masked or refused ----
+    ORDINARY = ['PWD=/home/qa', 'pwd: C:\\Users\\qa', 'session_id: 42', 'sid=7', 'max_token: 4096',
+                'max_tokens=4096', 'token_limit: 8000', 'retry_count=3', 'token: null', 'password: required',
+                'password_min_length: 8', 'api_key: ${OPENAI_API_KEY}', 'token: 放在環境變數 OPENAI_API_KEY',
+                'password_expires_days=90']
+    CREDENTIALS = [('password="0427"', '0427'), ('password=581', '581'), ('mysql --password 7391 -u qa', '7391'),
+                   ('token: qaopaquelettersonly', 'qaopaquelettersonly'),
+                   ('api_key=sk-qa0123456789abcdefghij', 'qa0123456789abcdefghij'),
+                   ("client_secret: 'qa spaced secret'", 'spaced secret')]
+
+    def test_ordinary_values_survive_and_credentials_are_caught_in_ledger_and_notes(self):
+        c = self.project('ordinary')
+        ref = self.append(c, 'tool', {'tool': 'Bash', 'input': {'command': 'env'},
+                                      'result': {'stdout': '\n'.join(self.ORDINARY + [l for l, _ in self.CREDENTIALS])}})
+        raw = self.run_py(self.ledger, '--config', self.config, '--project', c, 'source', '--ref', ref)
+        stdout = json.loads(raw.stdout)['record']['data']['result']['stdout']
+        for line in self.ORDINARY:
+            with self.subTest(view='ledger', ordinary=line):
+                self.assertIn(line, stdout.splitlines())
+        for line, secret in self.CREDENTIALS:
+            with self.subTest(view='ledger', credential=line):
+                self.assertNotIn(secret, stdout)
+        # Found in a real Claude Code run: the same lines inside ONE shell string with literal `\n`
+        # separators (prompt text and tool input), not real newlines.
+        literal = "printf '" + '\\n'.join(self.ORDINARY + [l for l, _ in self.CREDENTIALS]) + "\\n'"
+        prompt_ref = self.append(c, 'prompt', {'text': 'run exactly: ' + literal})
+        text = json.loads(self.run_py(self.ledger, '--config', self.config, '--project', c, 'source', '--ref',
+                                      prompt_ref).stdout)['record']['data']['text']
+        for line in self.ORDINARY:
+            with self.subTest(view='literal \\n', ordinary=line):
+                self.assertIn(line, text)
+        for line, secret in self.CREDENTIALS:
+            with self.subTest(view='literal \\n', credential=line):
+                self.assertNotIn(secret, text)
+        for number, line in enumerate(self.ORDINARY):
+            with self.subTest(view='note', ordinary=line):
+                result = self.remember(c, 'ordinary-' + str(number), 'QA', scope='project', value=line)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for number, (line, _) in enumerate(self.CREDENTIALS):
+            with self.subTest(view='note', credential=line):
+                before = tree_bytes(self.store(c))
+                result = self.remember(c, 'credential-' + str(number), 'QA', scope='project', value=line)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertEqual(tree_bytes(self.store(c)), before)
+
     # --- invariant 3: nothing is accepted or reported as fine on a ledger that fails verify ----
     def test_corrupt_ledger_is_never_extended_or_reported_as_valid(self):
         def rehashed(lines):

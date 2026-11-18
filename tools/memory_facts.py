@@ -94,11 +94,13 @@ def secret_values(text):
     found = [m.group(0) for m in _SECRET_PREFIX.finditer(text)]
     found += list(_auth_values(text))
     for keyword in re.finditer(_SECRET_WORD, text, re.I):
+        if re.match(r'[A-Za-z0-9_]', text[keyword.end():keyword.end() + 1]):
+            continue  # `password_expires_days`: the keyword starts a longer name, not a credential label.
         window = text[keyword.end():keyword.end() + 60]
         for match in _CANDIDATE.finditer(window):
             value = match.group(0)
             before = window[:match.start()]
-            if len(before) > 32 or re.search(r'[,，。;；&|\n<>]|\.\s', before):
+            if len(before) > 32 or re.search(r'[,，。;；&|\n<>\\]|\.\s', before):
                 break  # A value belongs to its keyword only within the same short clause (no `&& echo X`).
             if not (re.search(r'\d', value) and re.search(r'[A-Za-z]', value)):
                 continue  # Plain words or identifiers without digits are not treated as values.
@@ -116,12 +118,16 @@ def secret_values(text):
 # (letters only included). False positives only hide text in the raw layer; notes keep the
 # conservative secret_values() check.
 _NAME = (r'(?:password|passwd|passphrase|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|'
-         r'private[_-]?key|credentials?|session[_-]?id|sid)')
+         r'private[_-]?key|credentials?)')
 # A secret value is either quoted - then the WHOLE quoted text, spaces included (#54) - or one bare token.
-_VALUE = r'(?:"(?P<dq>(?:[^"\\\n]|\\.)*)"|\'(?P<sq>(?:[^\'\\\n]|\\.)*)\'|(?P<value>[^\s"\'&;,<>]+))'
+# A bare value ends at whitespace, quotes, separators or a backslash: inside one shell string,
+# `a=1\npassword=2` holds two assignments separated by a literal `\n`.
+_VALUE = r'(?:"(?P<dq>(?:[^"\\\n]|\\.)*)"|\'(?P<sq>(?:[^\'\\\n]|\\.)*)\'|(?P<value>(?:[^\s"\'&;,<>\\]|\\(?![nrt]))+))'
+# A name starts after a non-alphanumeric character or after a literal `\n`, `\r`, `\t` escape.
+_START = r'(?:(?<![A-Za-z0-9\\])|(?<=\\[nrt]))'
 _ASSIGNED = re.compile(
-    r'(?i)(?<![A-Za-z0-9])(?P<name>(?:[A-Za-z0-9]+[_.-])*' + _NAME + r')(?![A-Za-z0-9])["\']?\s*(?:=|:)\s*' + _VALUE)
-_FLAG = re.compile(r'(?i)(?<![A-Za-z0-9-])--?(?:password|passwd|pass|token|api-?key|secret|client-secret)'
+    r'(?i)' + _START + r'(?P<name>(?:[A-Za-z0-9]+[_.-])*' + _NAME + r')(?![A-Za-z0-9])["\']?\s*(?:=|:)\s*' + _VALUE)
+_FLAG = re.compile(r'(?i)(?:(?<![A-Za-z0-9-])|(?<=\\[nrt]))--?(?:password|passwd|pass|token|api-?key|secret|client-secret)'
                    r'(?:=|\s+)' + _VALUE)
 _QUOTED_AUTH = re.compile(r'(?i)\b(?:proxy-)?authorization\b["\']?\s*[:=]\s*(?:"(?P<dq>[^"\n]*)"|\'(?P<sq>[^\'\n]*)\')')
 _SCHEME = re.compile(r'(?i)^(\s*(?:basic|bearer|token|negotiate|digest|apikey|api-key|key)\s+)?.*$', re.S)
@@ -141,20 +147,53 @@ def _mask_value(match, keep=None):
     return match.group(0)[:start] + '[REDACTED]' + match.group(0)[end:]
 
 
-def _not_a_credential(value):
-    stripped = value.strip()
-    return (not stripped or stripped == '[REDACTED]' or re.fullmatch(
-        r'\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}|\$env:[A-Za-z_]\w*|%[A-Za-z_]\w*%', stripped,
-        flags=re.I) is not None)  # Keep exact environment variable references, not numeric credentials.
+_ENV_REF = re.compile(r'\$[A-Za-z_]\w*|\$\{[A-Za-z_]\w*\}|\$env:[A-Za-z_]\w*|%[A-Za-z_]\w*%', re.I)
+_PLACEHOLDER = {'null', 'none', 'nil', 'true', 'false', 'undefined', 'required', 'optional', 'yes', 'no',
+                'n/a', 'na', 'empty', 'unset', 'changeme', 'redacted', '<redacted>', '[redacted]'}
+# `max_token: 4096`, `password_min_length: 8`, `password_expires_days=90`: a name that describes a
+# limit or count of the credential, not the credential itself.
+_MEASURE = re.compile(r'(?i)(?:^|[_.-])(?:max|min|num|limit|count|len|length|size|ttl|timeout|expires?|days|'
+                      r'hours|minutes|seconds|age|retries|attempts)(?:[_.-]|$)')
+
+
+def credential_value(name, value):
+    """One judgement for the raw-ledger masker and the note guard: is `value`, assigned to the
+    credential-looking `name`, an actual secret? Ordinary values stay readable (env refs, empty
+    placeholders, paths for `pwd`, numbers for limit/count names, prose that is not ASCII)."""
+    stripped = (value or '').strip().strip('.')
+    name = (name or '').lower()
+    if not stripped or stripped.lower() in _PLACEHOLDER or _ENV_REF.fullmatch(stripped):
+        return False
+    if re.fullmatch(r'[*xX.\-_]+', stripped):
+        return False  # Masks such as ****, xxx.
+    if re.search(r'[^\x00-\x7f]', stripped):
+        return False  # `token: 放在環境變數 ...` is prose about where a secret lives, not the secret.
+    if re.search(r'(?:^|[_.-])pwd$', name) and re.match(r'(?:[/~.]|[A-Za-z]:[\\/])', stripped):
+        return False  # PWD / pwd is the working directory.
+    if _MEASURE.search(name) and re.fullmatch(r'\d+(?:\.\d+)?[a-z]{0,2}', stripped, re.I):
+        return False
+    return True
+
+
+def _keep(match):
+    try:
+        name = match.group('name')
+    except IndexError:
+        name = 'password'
+    return lambda value: not credential_value(name, value)
 
 
 def note_has_credential(text):
-    # Notes must not publish explicitly labelled PINs that have no recognizable secret prefix.
-    return bool(secret_values(text)) or any(
-        value and value.strip().rstrip('.').isdecimal()
-        for pattern in (_ASSIGNED, _FLAG) for match in pattern.finditer(text)
-        for value in (match.group('dq'), match.group('sq'), match.group('value'))
-    )
+    """Notes never publish a credential: prefixed tokens (sk-, ghp_ ...) or any value explicitly
+    assigned to a credential name (password=0427, token: lettersonly), judged like the ledger masker."""
+    if secret_values(text):
+        return True
+    for pattern in (_ASSIGNED, _FLAG):
+        for match in pattern.finditer(text):
+            value = next(v for v in (match.group('dq'), match.group('sq'), match.group('value')) if v is not None)
+            if not _keep(match)(value):
+                return True
+    return False
 
 
 def redact(text):
@@ -168,5 +207,5 @@ def redact(text):
                             + m.group(0)[-1], text)
     text = _COOKIE_LINE.sub(lambda m: m.group('head') + _COOKIE_VALUE.sub('=[REDACTED]', m.group('body')), text)
     text = _USERINFO.sub(lambda m: m.group('head') + ':[REDACTED]@', text)
-    text = _FLAG.sub(lambda m: _mask_value(m, _not_a_credential), text)
-    return _ASSIGNED.sub(lambda m: _mask_value(m, _not_a_credential), text)
+    text = _FLAG.sub(lambda m: _mask_value(m, _keep(m)), text)
+    return _ASSIGNED.sub(lambda m: _mask_value(m, _keep(m)), text)
