@@ -261,11 +261,13 @@ class GlobalQAMatrix(unittest.TestCase):
     ORDINARY = ['PWD=/home/qa', 'pwd: C:\\Users\\qa', 'session_id: 42', 'sid=7', 'max_token: 4096',
                 'max_tokens=4096', 'token_limit: 8000', 'retry_count=3', 'token: null', 'password: required',
                 'password_min_length: 8', 'api_key: ${OPENAI_API_KEY}', 'token: 放在環境變數 OPENAI_API_KEY',
-                'password_expires_days=90']
+                'password_expires_days=90', '金鑰：存放於環境變數 QA_KEY', 'token: "环境变量 QA_TOKEN"']
     CREDENTIALS = [('password="0427"', '0427'), ('password=581', '581'), ('mysql --password 7391 -u qa', '7391'),
                    ('token: qaopaquelettersonly', 'qaopaquelettersonly'),
                    ('api_key=sk-qa0123456789abcdefghij', 'qa0123456789abcdefghij'),
-                   ("client_secret: 'qa spaced secret'", 'spaced secret')]
+                   ("client_secret: 'qa spaced secret'", 'spaced secret'),
+                   ('password=測試甲', '測試甲'), ('密碼：測試乙', '測試乙'),
+                   ('--password "échantillon exemple"', 'échantillon exemple')]
 
     def test_ordinary_values_survive_and_credentials_are_caught_in_ledger_and_notes(self):
         c = self.project('ordinary')
@@ -301,6 +303,14 @@ class GlobalQAMatrix(unittest.TestCase):
                 result = self.remember(c, 'credential-' + str(number), 'QA', scope='project', value=line)
                 self.assertEqual(result.returncode, 1, result.stdout)
                 self.assertEqual(tree_bytes(self.store(c)), before)
+
+        page = next(self.store(c).glob('feedback/*.md'))
+        before = tree_bytes(self.store(c))
+        edited = page.read_text(encoding='utf-8') + '\n密碼：合成測試值\n'
+        result = self.apply(c, 'project', {page.relative_to(self.store(c)).as_posix(): edited})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('credential-like value', result.stderr)
+        self.assertEqual(tree_bytes(self.store(c)), before)
 
     # --- invariant 3: nothing is accepted or reported as fine on a ledger that fails verify ----
     def test_corrupt_ledger_is_never_extended_or_reported_as_valid(self):
