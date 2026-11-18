@@ -770,6 +770,16 @@ class BackgroundModeTests(Base):
                                           lambda cmd, text: prompts.append(text) or 0), 0)
         self.assertIn('QA-FAILED-STATE-73', prompts[0])
 
+    def test_codex_worker_supports_ordinary_directories(self):
+        import memory_dream as dream
+        arguments = dream.AGENTS['codex']
+        self.assertIn('--skip-git-repo-check', arguments)
+        self.assertEqual(arguments[arguments.index('--sandbox') + 1], 'workspace-write')
+        command = dream.agent_command({'dream_agent': 'codex'})
+        if command:
+            parsed = subprocess.run([*command, '--help'], cwd=self.project, capture_output=True, timeout=30)
+            self.assertEqual(parsed.returncode, 0, parsed.stderr)
+
     def test_independent_reader_verifies_ledger_format(self):
         """Spec in docs/ledger-format.md, reimplemented with json + hashlib only."""
         import hashlib

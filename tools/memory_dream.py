@@ -23,7 +23,7 @@ RECORD_CAP = 4000      # Characters of one record shown to the consolidating age
 CHUNK_CAP = 120000     # Characters of records per agent call; larger ranges are split.
 AGENTS = {
     'claude': ['claude', '-p', '--allowedTools', 'Bash(python:*)', 'Bash(py:*)', 'Bash(python3:*)', 'Read'],
-    'codex': ['codex', 'exec', '--full-auto', '-'],
+    'codex': ['codex', 'exec', '--sandbox', 'workspace-write', '--skip-git-repo-check', '-'],
 }
 
 INSTRUCTIONS = """你是 Jason-memory 的背景整理程序（做夢）。前台 Agent 不寫記憶；你只根據下面的原始紀錄整理。
