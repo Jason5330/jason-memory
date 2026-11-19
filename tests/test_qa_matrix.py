@@ -261,13 +261,19 @@ class GlobalQAMatrix(unittest.TestCase):
     ORDINARY = ['PWD=/home/qa', 'pwd: C:\\Users\\qa', 'session_id: 42', 'sid=7', 'max_token: 4096',
                 'max_tokens=4096', 'token_limit: 8000', 'retry_count=3', 'token: null', 'password: required',
                 'password_min_length: 8', 'api_key: ${OPENAI_API_KEY}', 'token: 放在環境變數 OPENAI_API_KEY',
-                'password_expires_days=90', '金鑰：存放於環境變數 QA_KEY', 'token: "环境变量 QA_TOKEN"']
+                'password_expires_days=90', '金鑰：存放於環境變數 QA_KEY', 'token: "环境变量 QA_TOKEN"',
+                # Chinese prose after a colon describes the credential (found in self-QA of #66).
+                '密碼：請向管理員索取', '密碼：不要寫進筆記', '憑證：已過期', '密碼：同上', '密碼：無',
+                '密碼：每 90 天更換一次', 'API 金鑰：由使用者在執行時輸入', '令牌：從 vault 取得', '密碼：（略）',
+                '密钥：保存在环境变量 QA_KEY 中', '密碼存在 1Password', '密碼政策：至少 12 碼']
     CREDENTIALS = [('password="0427"', '0427'), ('password=581', '581'), ('mysql --password 7391 -u qa', '7391'),
                    ('token: qaopaquelettersonly', 'qaopaquelettersonly'),
                    ('api_key=sk-qa0123456789abcdefghij', 'qa0123456789abcdefghij'),
                    ("client_secret: 'qa spaced secret'", 'spaced secret'),
                    ('password=測試甲', '測試甲'), ('密碼：測試乙', '測試乙'),
-                   ('--password "échantillon exemple"', 'échantillon exemple')]
+                   ('--password "échantillon exemple"', 'échantillon exemple'),
+                   ('密碼：(qa123abc)', 'qa123abc'), ('密碼：用qa77secret', 'qa77secret'),
+                   ('密碼=請勿外流丁', '請勿外流丁'), ('密碼：「測試丙」', '測試丙')]
 
     def test_ordinary_values_survive_and_credentials_are_caught_in_ledger_and_notes(self):
         c = self.project('ordinary')
@@ -484,6 +490,106 @@ print('JASON_DREAM_STATUS: ok')
                                           if 'archive' not in p.parts]), names)
             found = self.run_py(self.ledger, '--config', self.config, '--project', b, 'source', '--ref', b_ref)
             self.assertEqual(found.returncode, 0, found.stderr)
+
+
+    # --- invariant 5: the built-in Codex worker may write where the notes live, and only there ---
+    def test_builtin_codex_worker_saves_through_its_sandbox_and_new_session_recalls(self):
+        """#69: the worker runs with cwd = project under `workspace-write`; the global memory home is
+        outside the project. A fake `codex` enforces the same writable roots with an audit hook."""
+        bin_dir, log = self.base / 'fake-codex-bin', self.base / 'fake-codex-argv.jsonl'
+        bin_dir.mkdir(exist_ok=True)
+        guard = bin_dir / 'sandbox_guard.py'
+        guard.write_text(r'''
+import os, runpy, sys
+roots = [os.path.normcase(os.path.realpath(p)) for p in os.environ['QA_WRITABLE'].split(os.pathsep)]
+WRITE = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
+def inside(path):
+    path = os.path.normcase(os.path.realpath(os.fspath(path)))
+    return any(path == r or path.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+def hook(event, args):
+    targets = ()
+    if event == 'open' and isinstance(args[0], (str, bytes, os.PathLike)) and (args[2] or 0) & WRITE:
+        targets = (args[0],)
+    elif event in ('os.mkdir', 'os.remove', 'os.rmdir', 'os.truncate', 'os.symlink', 'os.link'):
+        targets = (args[0],)
+    elif event == 'os.rename':
+        targets = args[:2]
+    for target in targets:
+        if not isinstance(target, int) and not inside(target):
+            raise PermissionError('read-only sandbox: ' + os.fspath(target))
+sys.addaudithook(hook)
+script = sys.argv[1]
+sys.argv = sys.argv[1:]
+sys.path.insert(0, os.path.dirname(os.path.abspath(script)))
+runpy.run_path(script, run_name='__main__')
+''', encoding='utf-8')
+        fake = bin_dir / 'fake_codex.py'
+        fake.write_text(r'''
+import json, os, re, shlex, subprocess, sys
+args = sys.argv[1:]
+with open(os.environ['QA_CODEX_LOG'], 'a', encoding='utf-8') as f:
+    f.write(json.dumps({'argv': args, 'cwd': os.getcwd()}) + '\n')
+assert args[:3] == ['exec', '--sandbox', 'workspace-write'] and args[-1] == '-', args
+writable = [os.getcwd()] + [args[i + 1] for i, a in enumerate(args) if a == '--add-dir']
+text = sys.stdin.buffer.read().decode('utf-8')
+prefix = shlex.split(next(l for l in text.splitlines() if l.startswith('指令前綴（Bash）：')).split('：', 1)[1])
+ref = re.search(r'\[ref (\S+) session', text).group(1)
+value = re.search(r'(QA_CODEX_PREF_\w+)', text).group(1)
+env = dict(os.environ, QA_WRITABLE=os.pathsep.join(writable), PYTHONDONTWRITEBYTECODE='1')
+done = subprocess.run([prefix[0], os.environ['QA_GUARD'], *prefix[1:], 'remember', '--scope', 'project',
+                       '--type', 'feedback', '--subject', 'user', '--key', 'report-format', '--value', value,
+                       '--why', '使用者要求；來源：ledger ' + ref], env=env, capture_output=True, text=True,
+                      encoding='utf-8')
+if done.returncode:
+    print('環境唯讀，未執行保存：' + done.stderr.strip()[-300:])
+else:
+    print('JASON_DREAM_STATUS: ok')
+''', encoding='utf-8')
+        if os.name == 'nt':
+            (bin_dir / 'codex.cmd').write_text('@"' + sys.executable + '" "' + str(fake) + '" %*\r\n', encoding='utf-8')
+        else:
+            launcher = bin_dir / 'codex'
+            launcher.write_text('#!/bin/sh\nexec "' + sys.executable + '" "' + str(fake) + '" "$@"\n', encoding='utf-8')
+            launcher.chmod(0o755)
+        cfg = json.loads(self.config.read_text(encoding='utf-8'))
+        original = dict(cfg['ledger'])
+        cfg['ledger']['dream_agent'] = 'codex'
+        self.config.write_text(json.dumps(cfg), encoding='utf-8')
+        self.addCleanup(lambda: self.config.write_text(json.dumps(dict(cfg, ledger=original)), encoding='utf-8'))
+        env = {'PATH': str(bin_dir) + os.pathsep + os.environ.get('PATH', ''), 'QA_CODEX_LOG': str(log),
+               'QA_GUARD': str(guard)}
+        shared = self.home / 'memory/shared'
+
+        def recall(project, value):
+            context = self.run_py(self.runtime, '--config', self.config, '--project', project, 'index')
+            self.assertEqual(context.returncode, 0, context.stderr)
+            return value in context.stdout
+
+        with self.subTest(entry='dream-run (background trigger)'):
+            p, other = self.project('codex-worker'), self.project('codex-other')
+            self.append(p, 'prompt', {'text': '請記住：這個專案的報告一律用 QA_CODEX_PREF_RUN 格式'})
+            head = self.append(p, 'assistant', {'text': '好的'}).split(':')[1]
+            before = tree_bytes(shared)
+            result = self.run_py(self.ledger, '--config', self.config, '--project', p, 'dream-run', '--upto', head,
+                                 extra_env=env)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            state = json.loads(self.run_py(self.ledger, '--config', self.config, '--project', p, 'pending').stdout)
+            self.assertEqual((state['cursor'], state['pending'], state['last_error']), (int(head), 0, None))
+            call = json.loads(log.read_text(encoding='utf-8').splitlines()[-1])
+            opened = [call['argv'][i + 1] for i, a in enumerate(call['argv']) if a == '--add-dir']
+            self.assertEqual([os.path.normcase(os.path.realpath(d)) for d in opened],
+                             [os.path.normcase(os.path.realpath(self.home))])
+            self.assertTrue(recall(p, 'QA_CODEX_PREF_RUN'), 'a new session must recall the project preference')
+            self.assertFalse(recall(other, 'QA_CODEX_PREF_RUN'), 'project scope must not leak to other projects')
+            self.assertEqual(tree_bytes(shared), before)
+        with self.subTest(entry='rebuild (staged home)'):
+            p = self.project('codex-rebuild')
+            self.append(p, 'prompt', {'text': '請記住：這個專案的報告一律用 QA_CODEX_PREF_REBUILD 格式'})
+            result = self.run_py(self.dream, '--config', self.config, '--project', p, 'rebuild', '--yes', extra_env=env)
+            report = json.loads(result.stdout.splitlines()[-1])
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(report['rebuilt'])
+            self.assertTrue(recall(p, 'QA_CODEX_PREF_REBUILD'))
 
 
 if __name__ == '__main__':

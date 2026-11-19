@@ -120,7 +120,16 @@ def _claude_command(base):
     return base[:3] + extra + base[3:]
 
 
-def agent_command(opts):
+def _codex_command(base, writable):
+    # workspace-write only opens the cwd (the project). The global memory home lives
+    # outside it, so open exactly that directory too (#69); nothing else becomes writable.
+    if writable is None:
+        return base
+    return base[:-1] + ['--add-dir', str(writable)] + base[-1:]
+
+
+def agent_command(opts, writable=None):
+    """Built-in agent command. `writable` is the memory home the worker must write to."""
     agent = opts.get('dream_agent', 'auto')
     if isinstance(agent, list):
         return agent
@@ -129,7 +138,7 @@ def agent_command(opts):
         if name in AGENTS and shutil.which(AGENTS[name][0]):
             command = list(AGENTS[name])
             command[0] = shutil.which(command[0])
-            return _claude_command(command) if name == 'claude' else command
+            return _claude_command(command) if name == 'claude' else _codex_command(command, writable)
     return None
 
 
@@ -151,9 +160,10 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
     with runtime.opened(target, project) as (tcfg, _, troots):
         index_text = '\n\n'.join(scope + ':\n' + runtime.read_index(r) for scope, r in troots.items())
         prefix = runtime_prefix(target, project, tcfg)
+        home = runtime.configuration(target, project)[2]
     if not records:
         return 0
-    command = agent_command(opts) if runner is None else ['injected-runner']
+    command = agent_command(opts, home) if runner is None else ['injected-runner']
     if command is None:
         print('Jason-memory dream: no agent CLI found (claude/codex); set ledger.dream_agent', file=sys.stderr)
         return 127

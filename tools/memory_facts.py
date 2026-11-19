@@ -104,6 +104,8 @@ def secret_values(text):
                 break  # A value belongs to its keyword only within the same short clause (no `&& echo X`).
             if not (re.search(r'\d', value) and re.search(r'[A-Za-z]', value)):
                 continue  # Plain words or identifiers without digits are not treated as values.
+            if re.fullmatch(r'(?i)1password\d*', value):
+                continue  # The password manager's product name, not a value.
             if _ENV_HINT.search(before) or re.fullmatch(r'\$\{?[A-Z_][A-Z0-9_]*\}?', value):
                 continue
             if re.fullmatch(r'[A-Z][A-Z0-9_]*', value) and re.search(r'\b(?:env|環境|环境)', text, re.I):
@@ -178,14 +180,27 @@ def credential_value(name, value):
     return True
 
 
+# `密碼：請向管理員索取`, `憑證：已過期`, `密碼：同上`: after a colon, Chinese text that opens with an
+# instruction, negation, location or status word describes the credential; it is not the value.
+# `=` assignments and other CJK values (`密碼：測試乙`) stay credentials.
+_CJK_PROSE = re.compile(
+    r'(?:請|请|不|勿|別|别|禁止|由|見|见|詳見|详见|參見|参见|參考|参考|使用|用|從|从|向|找|問|问|詢問|询问|'
+    r'已|未|無|无|沒有|没有|暫無|暂无|同上|略|空|每|定期|自行|自己|自動|自动|存在|放在|保存|存放|儲存|储存|'
+    r'記在|记在|寫在|写在|在|透過|透过|通过|經由|经由|交由|待|需|須|须|要|會|会|可|應|应|為|为|是|改|換|换|'
+    r'更換|更换|一律|統一|统一|依|按|若|如|例如|範例|示例|以)(?![A-Za-z0-9])|'
+    r'（(?:略|無|无|空|待定|未設定|未设定|不提供)）')
+
+
 def _matched_credential(match, value):
-    # Only a location description after a colon gets the prose exception. Match the
-    # variable name too: an arbitrary non-ASCII string may be the credential itself.
+    # Only a location description or Chinese prose after a colon gets the prose exception.
+    # Match the variable name too: an arbitrary non-ASCII string may be the credential itself.
     if match.re is _ASSIGNED and match['separator'] in (':', '：'):
         if match['value'] is None:
             if _ENV_LOCATION.fullmatch(value):
                 return False
         elif _BARE_LOCATION.match(match.string, match.start('value')):
+            return False
+        if _CJK_PROSE.match(value.strip()):
             return False
     return credential_value(match['name'] if match.re is _ASSIGNED else 'password', value)
 

@@ -182,7 +182,7 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 | `enabled` | 開啟原始帳本 |
 | `foreground_writes` | `false`：前台 `remember`／`apply` 一律拒絕（`NOT SAVED: background memory mode`），不需當輪通知；`true`：回到前台保存＋通知的舊流程 |
 | `dream_every` | 累積幾筆未整理紀錄就啟動背景整理 |
-| `dream_agent` | `auto`（先找 `claude` 再找 `codex`）、`claude`、`codex`，或自訂指令陣列；提示由 stdin 傳入 |
+| `dream_agent` | `auto`（先找 `claude` 再找 `codex`）、`claude`、`codex`，或自訂指令陣列；提示由 stdin 傳入。內建 `codex` 以 `workspace-write` 沙箱在專案資料夾執行，並用 `--add-dir` 只額外開放這次要寫入的記憶庫資料夾（全局版的記憶庫在專案外，#69） |
 | `dream_command` | 進階：完全取代預設 worker（`tools/memory_dream.py consolidate`） |
 
 - **前台**：Claude 由 hooks 自動追加使用者提示、Shell 工具呼叫與結果、助理最終回覆；Codex 由

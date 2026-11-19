@@ -775,8 +775,11 @@ class BackgroundModeTests(Base):
         arguments = dream.AGENTS['codex']
         self.assertIn('--skip-git-repo-check', arguments)
         self.assertEqual(arguments[arguments.index('--sandbox') + 1], 'workspace-write')
-        command = dream.agent_command({'dream_agent': 'codex'})
+        command = dream.agent_command({'dream_agent': 'codex'}, self.root)
         if command:
+            # The memory home is opened for writing, not only the project cwd (#69).
+            self.assertEqual(command[command.index('--add-dir') + 1], str(self.root))
+            command = command[:-1]
             parsed = subprocess.run([*command, '--help'], cwd=self.project, capture_output=True, timeout=30)
             self.assertEqual(parsed.returncode, 0, parsed.stderr)
 
