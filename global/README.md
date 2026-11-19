@@ -132,7 +132,7 @@ Codex 會尊重 `CODEX_HOME`，Claude Code 會尊重 `CLAUDE_CONFIG_DIR`。
 
 若 AI 沒讀取入口、無法執行 Python，或要求檔案存取權限，先按該工具的支援方式處理；
 沒有實際筆記或召回時，不能只憑回答語氣認定已接通。怎麼說會被記住、整理時機與查詢指令，
-見 [README 的使用方法與技巧](https://github.com/Jason5330/jason-memory#使用方法與技巧)（全局版把設定與工具路徑換成
+見 [README](https://github.com/Jason5330/jason-memory#怎麼說會被記住)（全局版把設定與工具路徑換成
 `~/.jason-memory-global/framework/` 下的檔案，並加 `--project 目前資料夾`）。兩個 AI 的安全限制與授權不會互相繞過。
 所有筆記變更經由共用寫入工具序列化並健檢；直接手動改檔不受其並行保護。
 

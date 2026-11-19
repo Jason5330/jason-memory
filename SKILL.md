@@ -94,7 +94,7 @@ and follows the same index, dedup, correction, and retirement rules.
   status check on each task or write. (Credential values never belong in memory.)
 - A project-local directory is easy to locate, but git-ignored notes do not
   travel with `git clone`. Transfer them explicitly using the backup/restore
-  procedure in [README.md](README.md#備份與換機).
+  procedure in [docs/advanced.md](docs/advanced.md#備份與換機).
 - Keep Jason separate from host-managed memory writers. These instructions
   govern the agent's Jason operations; they cannot disable a host's internal
   memory manager. An explicitly chosen host-native directory is suitable only
@@ -503,7 +503,7 @@ Keep the index concise because reading it has a recurring context cost. At task
 start, read the entire configured index; if the tool truncates its output,
 continue in chunks before judging which notes are relevant. Exceeding 200 lines
 alone is not a Jason error. A native host's auto-loaded memory may have its own
-limits; see [README.md](README.md#索引整理與可選門檻) for the distinction.
+limits; see [docs/advanced.md](docs/advanced.md#索引整理與可選門檻) for the distinction.
 
 Optional positive `JASON_WARN` / `JASON_WARN_BYTES` values enable size warnings
 in jason_check. `JASON_HARD` / `JASON_HARD_BYTES` enable budget issues in both
@@ -594,12 +594,12 @@ writes bypass these guarantees. Back up before bulk changes.
 
 ## 9. Installation and upgrades
 
-Follow [README.md](README.md#安裝) to create the project store and install the
+Follow [README.md](README.md#下載與安裝) (or [manual setup](docs/advanced.md#手動接入既有專案)) to create the project store and install the
 standing rules. Python 3.9+ is needed for the runtime, checkers and Claude hooks.
 Project INSTALL.cmd merges hooks into existing settings; global installation does likewise.
 
 When upgrading a previous installation, follow
-[the migration instructions](README.md#從舊版升級): remove only the old Jason index
+[the migration instructions](docs/advanced.md#從舊版升級): remove only the old Jason index
 interceptor registration, preserve unrelated settings, update the standing
 rules and clear old budget environment variables if no budget is desired.
 Existing Markdown notes and frontmatter remain usable.

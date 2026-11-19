@@ -10,7 +10,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 ROOT = Path(__file__).resolve().parent.parent
 # Explicit files only: never scan the developer's working tree for release data.
 PACKAGE_FILES = (
-    'UNINSTALL.bat', 'tools/purge_memory.py', 'docs/uninstall.md',
+    'UNINSTALL.bat', 'tools/purge_memory.py', 'docs/uninstall.md', 'docs/advanced.md',
     '.jason-memory.json', '.claude/settings.json', 'INSTALL.cmd',
     'tools/memory_facts.py', 'tools/memory_runtime.py', 'tools/memory_ledger.py', 'tools/memory_dream.py', 'tools/codex_notify.py', 'docs/ledger-format.md', 'tools/claude_memory_hook.py',
     'tools/hook_settings.py', 'tools/install_hooks.py', 'global/global_store.py',
