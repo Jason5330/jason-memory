@@ -76,14 +76,36 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
     # Small index for navigation; full bodies only for always-apply user/feedback notes.
     for scope, info in sorted(snapshot.items(), key=lambda item: item[0] != 'project'):
         parts.append(scope + ' root=' + info['root'] + ' revision=' + info['revision'] + '\n')
-        issues = {key: info['audit'].get(key) for key in ('conflicts', 'invalid_facts', 'structural_errors')}
+        issues = {key: info['audit'].get(key) for key in ('conflicts', 'invalid_facts')}
         if any(issues.values()):
             issue = json.dumps(issues, ensure_ascii=False)
             parts.append('CONFLICT: do not choose an unsupported value. Audit/correct before asserting it. '
                          + issue[:1000] + '\n')
+        structure = info['audit'].get('structural_errors')
+        if structure:
+            # Index/file problems are not value conflicts (#78): the notes may still be correct.
+            parts.append('STORE CHECK (structure, not a value conflict; notes may be unlisted in the index): '
+                         + structure[:600] + '\n')
+        duplicates = info['audit'].get('duplicates') or []
+        if duplicates:
+            parts.append('DUPLICATE FACTS (same value in several notes; a correction must update all of them in one '
+                         'plan): ' + '; '.join(d['subject'] + '/' + d['predicate'] + ' in ' + ', '.join(d['paths'])
+                                               for d in duplicates)[:600] + '\n')
         rows = [line for line in info.get('index', '').splitlines() if line.startswith('- [')]
         if rows:
-            parts.append('INDEX ' + scope + ' (read a listed note only when relevant):\n' + '\n'.join(rows)[:INDEX_SHARE] + '\n')
+            shown, size = [], 0
+            for row in rows:
+                if size + len(row) + 1 > INDEX_SHARE:
+                    break
+                shown.append(row)
+                size += len(row) + 1
+            text = 'INDEX ' + scope + ' (read a listed note only when relevant):\n' + '\n'.join(shown) + '\n'
+            if len(shown) < len(rows):
+                # Never drop index rows silently (#72): the AI must know the rest exists.
+                text += ('INDEX TRUNCATED: ' + str(len(rows) - len(shown)) + ' of ' + str(len(rows)) + ' ' + scope
+                         + ' index rows not shown; run the index command (Command prefix + index) for the full '
+                         'list before concluding a note does not exist.\n')
+            parts.append(text)
         always = sorted((name, body) for name, body in info['notes'].items()
                         if re.search(r'^type: (user|feedback)\s*$', body, re.M))
         ordered_notes.extend((scope, name, str(Path(info['root']) / name), body) for name, body in always)
@@ -94,9 +116,17 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
         else:
             omitted.append('--scope ' + scope + ' --note ' + name)
     if omitted:
-        parts.append('\nPARTIAL SNAPSHOT: ' + str(len(omitted)) + ' preference notes omitted. Do NOT dump the whole '
-                     'store with context. Only if one may apply to THIS task, read just that note with: '
-                     'the Command prefix above + read --scope SCOPE --note RELATIVE_NOTE. Omitted: ' + '; '.join(omitted)[:700] + '\n')
+        listed, size = [], 0
+        for item in omitted:
+            if size + len(item) + 2 > 700:
+                break
+            listed.append(item)
+            size += len(item) + 2
+        more = len(omitted) - len(listed)
+        parts.append('\nPARTIAL SNAPSHOT: ' + str(len(omitted)) + ' user/feedback note bodies omitted. Do NOT dump the '
+                     'whole store with context. Only if one may apply to THIS task, read just that note with: '
+                     'the Command prefix above + read --scope SCOPE --note RELATIVE_NOTE. Omitted: ' + '; '.join(listed)
+                     + ((' (+' + str(more) + ' more; see the index command)') if more else '') + '\n')
     text = ''.join(parts)[:limit]
     return text
 

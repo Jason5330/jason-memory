@@ -9,6 +9,7 @@ JSON 與算 SHA-256，就能重播並驗證它；不需要本專案的程式碼�
 <memory_root>/.raw/ledger.jsonl      每行一筆紀錄，UTF-8，只追加
 <memory_root>/.raw/blobs/<sha256>    文件逐位元組鏡像，檔名即內容的 SHA-256
 <memory_root>/.raw/dream.json        背景整理游標（衍生狀態，可刪除後從 0 重建）
+<memory_root>/.raw/dream.log         最近一次背景整理的輸出（診斷用，每次覆寫）
 ```
 
 ## 紀錄欄位
@@ -45,6 +46,7 @@ SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --
 一般值不遮蔽：`PWD=/home/qa` 等路徑、`session_id: 42`、`max_token: 4096` 等上限／計數、`token: null` 等空值與佔位字，
 以及指出環境變數名稱的說明（例如 `金鑰：存放於環境變數 QA_KEY`）、冒號後以說明用語開頭的中文（`密碼：請向管理員索取`、`憑證：已過期`、`密碼：同上`）與 `1Password` 等產品名稱。同一個判斷也用於筆記：明確指定給憑證名稱的值（含短數字、純字母及非 ASCII 字元）不能存進筆記。
 命令字串中的字面 `\n`、`\r`、`\t` 視為分隔。
+句子寫法也會遮蔽（#74）：`password is 0427`、`the token was qa1234`、`密碼是 1234` 等憑證名稱以 `is`／`was`／`是`／`為`／`改成`接上含數字的值。`password is required`、`token is expired`、`password is 8 characters`、`max token is 4096`、`密碼是必填` 這類說明保留。
 明確密碼欄位或參數中的短數字也會遮蔽。一般計量欄位如 `retry_count` 保留。
 
 雜湊鏈或已整理游標的 checkpoint 驗證不通過時（含截短、重新計算雜湊的改寫，#53），`append`、`mirror` 一律拒絕寫入，帳本保持原狀供診斷；Claude hook 只顯示警告、不阻擋對話（#51）。

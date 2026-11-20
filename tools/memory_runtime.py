@@ -10,6 +10,7 @@ import json
 import os
 import re
 from pathlib import Path
+import shutil
 import sys
 import tempfile
 import time
@@ -182,15 +183,25 @@ def validate(data, index):
     return output.getvalue().strip(), facts
 
 
+def journal_error(path, reason):
+    """A journal that cannot be replayed blocks every command; say which file and how to get out (#79)."""
+    return ValueError(reason + ': ' + str(path) + '. It records an interrupted save that cannot be replayed. '
+                      'Back it up, move it out of the memory folder, then retry; the notes on disk stay as they '
+                      'are and the raw ledger is not affected. Manual review required.')
+
+
 def recover(root, _prepared=None):
     journal = storelib.safe(root / '.transaction.json', root)
     if not journal.exists():
         return
-    tx = read_json(journal)
+    try:
+        tx = read_json(journal)
+    except (OSError, ValueError):
+        raise journal_error(journal, 'Unreadable transaction journal') from None
     if (not isinstance(tx, dict) or set(tx) != {'id', 'notes', 'before', 'remove', 'index'} or
             not isinstance(tx['id'], str) or len(tx['id']) != 32 or
             any(c not in '0123456789abcdef' for c in tx['id'])):
-        raise ValueError('Invalid transaction journal; manual review required')
+        raise journal_error(journal, 'Invalid transaction journal')
     if not isinstance(tx['notes'], dict) or not isinstance(tx['before'], dict) or not isinstance(tx['remove'], list):
         raise ValueError('Invalid transaction payload')
     check_write_paths(root, [*tx['notes'], *tx['before'], *tx['remove']])
@@ -235,14 +246,17 @@ def recover_global_rebuild(home, prepared=None):
         return
     # The batch contains at most one normal-sized transaction for each scope.
     if journal.stat().st_size > 2 * MAX_BYTES + 256:
-        raise ValueError('Oversized global rebuild journal; manual review required')
-    batch = json.loads(journal.read_text(encoding='utf-8'))
+        raise journal_error(journal, 'Oversized global rebuild journal')
+    try:
+        batch = json.loads(journal.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        raise journal_error(journal, 'Unreadable global rebuild journal') from None
     if (not isinstance(batch, dict) or set(batch) != {'project', 'transactions'} or
             not isinstance(batch['project'], str) or len(batch['project']) != 64 or
             any(c not in '0123456789abcdef' for c in batch['project']) or
             not isinstance(batch['transactions'], dict) or
             not batch['transactions'].keys() <= {'global', 'project'}):
-        raise ValueError('Invalid global rebuild journal; manual review required')
+        raise journal_error(journal, 'Invalid global rebuild journal')
     roots = {'global': home / 'memory/shared', 'project': home / 'memory/projects' / batch['project']}
     for scope, tx in batch['transactions'].items():
         root = storelib.safe(roots[scope], home)
@@ -277,11 +291,59 @@ def opened(config, project=None):
             storelib.safe(root, lock_root)
             root.mkdir(parents=True, exist_ok=True)
             index = storelib.safe(root / 'MEMORY.md', lock_root)
-            if not index.exists():
+            missing = not index.exists()
+            if missing:
                 storelib.atomic_write(index, (BASE / 'templates/MEMORY.md').read_text(encoding='utf-8-sig'))
             storelib.recover(root)
             recover(root)
+            repair(root, missing)
         yield cfg, project, roots
+
+
+def quarantine_oversized(root):
+    """A note over the reading cap would fail every command for the whole store (#77). Move it,
+    byte for byte, to archive/quarantine/ so the store keeps working and the content stays reviewable."""
+    moved = []
+    for folder, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if d != 'archive' and not d.startswith('.'))
+        for filename in sorted(files):
+            path = Path(folder) / filename
+            if (path.suffix.casefold() != '.md' or path.name.startswith('.') or path.name.casefold() == 'memory.md'
+                    or path.is_symlink() or path.stat().st_size <= storelib.doctor.NOTE_READ_CAP):
+                continue
+            rel = path.relative_to(root).as_posix()
+            target = storelib.safe(root / 'archive/quarantine' / uuid.uuid4().hex / rel, root)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, target)
+            if target.stat().st_size != path.stat().st_size:
+                raise ValueError('Could not quarantine oversized note: ' + str(path))
+            path.unlink()
+            moved.append((rel, target))
+    if moved:
+        manifest = storelib.safe(root / 'archive/MEMORY.md', root)
+        links = sorted(p.relative_to(manifest.parent).as_posix() for p in manifest.parent.rglob('*.md') if p != manifest)
+        storelib.atomic_write(manifest, '# 歷史資料，不作現行要求\n\n' + ''.join('- [' + p + '](' + p + ')\n' for p in links))
+    return moved
+
+
+def repair(root, index_missing=False):
+    """Self-heal states the runtime can fix from what is on disk, and say so on stderr."""
+    moved = quarantine_oversized(root)
+    for rel, target in moved:
+        print('Jason-memory: note over the ' + str(storelib.doctor.NOTE_READ_CAP // (1024 * 1024)) + ' MiB reading '
+              'limit was moved out of the active notes: ' + rel + ' -> ' + str(target), file=sys.stderr)
+    if not (moved or index_missing):
+        return
+    try:
+        data = notes(root)
+        rebuilt = index_for(data, (root / 'archive/MEMORY.md').exists()) if data or moved else None
+    except ValueError as exc:
+        print('Jason-memory: index could not be rebuilt automatically: ' + str(exc), file=sys.stderr)
+        return
+    if rebuilt is not None and read_index(root) != rebuilt:
+        storelib.atomic_write(root / 'MEMORY.md', rebuilt)
+        print('Jason-memory: MEMORY.md was ' + ('missing' if index_missing else 'out of date') + '; rebuilt it from '
+              + str(len(data)) + ' note(s): ' + str(root / 'MEMORY.md'), file=sys.stderr)
 
 
 def context(roots):
@@ -461,12 +523,17 @@ def remember(root, subject, key, value, why, scope='project', kind=None, roots=N
     data = notes(root)
     matches, retype = [], []
     wanted = memory_facts.canonical(value) if key == 'occupation' else value
+    holders = sorted(name for name, content in data.items()
+                     if any((s, p) == (subject, key) for s, p, _ in memory_facts.extract(content)[0]))
     for name, content in data.items():
         facts, _ = memory_facts.extract(content)
         for s, p, v in facts:
             if (s, p) == (subject, key):
                 if v != wanted:
-                    raise ValueError('Existing fact differs: use context and apply to batch-correct related notes, preserving other facts: ' + name)
+                    # Name every note holding this fact: correcting only one is rejected as a conflict (#76).
+                    raise ValueError('Existing fact differs: use context and apply to batch-correct related notes in '
+                                     'ONE plan, preserving other facts. Notes holding ' + subject + '/' + key + ': '
+                                     + ', '.join(holders))
                 fm, _, _ = storelib.doctor._frontmatter(content)
                 # A single-fact note filed under the wrong type is moved, not duplicated.
                 if explicit and fm and fm.get('type') != kind and len(facts) == 1:

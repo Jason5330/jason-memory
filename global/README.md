@@ -2,7 +2,7 @@
 
 **永久移除：** 關閉 AI 工作階段後，雙擊 `UNINSTALL.bat`，移除框架、全局庫
 （含其中所有專案記憶）與 Jason-memory 入口／hooks。保留其他 AI 設定與工作檔案。
-刪除不可復原，詳細範圍與預覽方式見 [清除說明](docs/uninstall.md)。
+刪除不可復原，詳細範圍與預覽方式見 [清除說明](https://github.com/Jason5330/jason-memory/blob/master/docs/uninstall.md)。
 
 讓**同一位使用者、同一台電腦上的不同本機 AI 工具**共用記憶。
 全局偏好供所有專案使用，個別專案的需求另外保存，避免互相套錯規則。
@@ -175,4 +175,4 @@ python global/install.py --agent both --uninstall
 啟動匯入不保證模型每次完整遵守；本版提供 Claude hooks，仍不保證模型完全遵守。
 
 新版安裝會合併 Claude settings.json 的 Jason hooks，保留其他事件與既有記憶。
-跨筆記更正、版本交易及保存通知詳見 [runtime 協議](docs/memory-runtime.md)。
+跨筆記更正、版本交易及保存通知詳見 [runtime 協議](https://github.com/Jason5330/jason-memory/blob/master/docs/memory-runtime.md)。

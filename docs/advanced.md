@@ -159,8 +159,8 @@ doctor 保留 **1 MiB 索引／4 MiB 單篇筆記的解析保護**，超過時�
 
 ## 開發與測試
 
-以下供框架維護者使用。換電腦或換 AI 接手開發時，先讀 [開發交接入口](../HANDOFF.md) 與
-[踩坑經驗](踩坑經驗總結.md)。
+以下供框架維護者使用。換電腦或換 AI 接手開發時，先讀 [開發交接入口](https://github.com/Jason5330/jason-memory/blob/master/HANDOFF.md) 與
+[踩坑經驗](https://github.com/Jason5330/jason-memory/blob/master/docs/踩坑經驗總結.md)（兩份只在 GitHub 原始碼中，不在 ZIP 內）。
 
 產生乾淨下載包（不呼叫 Git，只打包明確列出的公開檔案，目標 ZIP 已存在時拒絕覆寫）：
 

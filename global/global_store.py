@@ -129,10 +129,13 @@ def recover(store):
         return
     # JSON can expand one control character to six bytes (e.g. \u0000).
     if journal.stat().st_size > 6 * (doctor.INDEX_READ_CAP + doctor.NOTE_READ_CAP) + 4096:
-        raise ValueError('Oversized recovery journal; manual review required')
-    pending = json.loads(journal.read_text(encoding='utf-8'))
+        raise ValueError('Oversized recovery journal: ' + str(journal) + '. Back it up, move it out of the memory folder, then retry; manual review required')
+    try:
+        pending = json.loads(journal.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        raise ValueError('Unreadable recovery journal: ' + str(journal) + '. Back it up, move it out of the memory folder, then retry; manual review required') from None
     if not isinstance(pending,dict) or set(pending) not in ({'slug','content','index'}, {'slug','content','index','archive'}) or not all(isinstance(v,str) for v in pending.values()):
-        raise ValueError('Invalid recovery journal; manual review required')
+        raise ValueError('Invalid recovery journal: ' + str(journal) + '. Back it up, move it out of the memory folder, then retry; manual review required')
     retired = 'archive' in pending
     validate(store, pending['slug'], pending['content'], pending['index'], retire=retired)
     path = safe(store / (pending['slug'] + '.md'),store)

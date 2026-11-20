@@ -210,7 +210,8 @@ class RuntimeTests(unittest.TestCase):
         self.apply({'job.md': note('job')})
         (self.root / 'MEMORY.md').write_text('# Index\n- [broken](missing.md)\n', encoding='utf-8')
         result = self.event('SessionStart')['hookSpecificOutput']['additionalContext']
-        self.assertIn('CONFLICT', result)
+        self.assertIn('STORE CHECK', result)
+        self.assertNotIn('CONFLICT:', result)
         self.assertIn('missing.md', result)
 
     def test_index_derived_from_current_description(self):

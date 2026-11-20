@@ -182,8 +182,13 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 | `enabled` | 開啟原始帳本 |
 | `foreground_writes` | `false`：前台 `remember`／`apply` 一律拒絕（`NOT SAVED: background memory mode`），不需當輪通知；`true`：回到前台保存＋通知的舊流程 |
 | `dream_every` | 累積幾筆未整理紀錄就啟動背景整理 |
-| `dream_agent` | `auto`（先找 `claude` 再找 `codex`）、`claude`、`codex`，或自訂指令陣列；提示由 stdin 傳入。內建 `codex` 以 `workspace-write` 沙箱在專案資料夾執行，並用 `--add-dir` 只額外開放這次要寫入的記憶庫資料夾（全局版的記憶庫在專案外，#69） |
+| `dream_agent` | `auto`（先找 `claude` 再找 `codex`；PATH 上沒有時，也會找 VS Code 等編輯器擴充套件內附的 `claude`、`~/.local/bin` 與 npm 全域安裝位置，#71）、`claude`、`codex`，或自訂指令陣列；提示由 stdin 傳入。內建 `codex` 以 `workspace-write` 沙箱在專案資料夾執行，並用 `--add-dir` 只額外開放這次要寫入的記憶庫資料夾（全局版的記憶庫在專案外，#69） |
+| `dream_timeout` | 單次呼叫 agent 的逾時秒數，預設 `1800`。逾時會終止 agent 及其子程序，紀錄留待下次；逾時後 10 分鐘內不自動重試，手動 `dream-run` 不受限（#73） |
 | `dream_command` | 進階：完全取代預設 worker（`tools/memory_dream.py consolidate`） |
+
+背景整理失敗時，`pending` 的 `last_error` 會寫出原因與 worker 最後幾行輸出（已遮蔽憑證），完整輸出在 `.raw/dream.log`（每次執行覆寫）。安裝時若找不到任何 agent CLI，安裝結果的 `warnings` 會直接提醒；帳本照常記錄，資料不會遺失（#71、#73）。
+
+記憶庫能自行修復的狀態會在下次開啟時處理並在 stderr 說明：`MEMORY.md` 遺失時從現有筆記重建（#78）；單則筆記超過 4 MiB 讀取上限時原封不動移到 `archive/quarantine/`，其他記憶照常運作（#77）。交易紀錄檔無法重播時，錯誤訊息會寫出檔案路徑與處理方式，`jason_doctor` 也會回報（#79）。
 
 - **前台**：Claude 由 hooks 自動追加使用者提示、Shell 工具呼叫與結果、助理最終回覆；Codex 由
   `notify` 程式（`tools/codex_notify.py`）在每輪結束追加。專案的 `INSTALL.cmd` 會一次完成兩邊：合併 Claude

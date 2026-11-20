@@ -140,6 +140,27 @@ def atomic_write(path, data):
             os.unlink(name)
 
 
+def missing_agent(home):
+    """The consolidation CLI the installed configuration would use, or a warning when none is found."""
+    tools = Path(__file__).resolve().parents[1] / "tools"
+    agent = "auto"
+    config = home / "framework/memory-config.json"
+    try:
+        agent = (json.loads(config.read_text(encoding="utf-8")).get("ledger") or {}).get("dream_agent", "auto")
+    except (OSError, ValueError, AttributeError):
+        pass
+    if isinstance(agent, list):
+        return None
+    sys.path.insert(0, str(tools))
+    try:
+        import memory_dream
+        return None if memory_dream.agent_command({"dream_agent": agent}) else memory_dream.NO_AGENT
+    except Exception:  # A probe must never break installation.
+        return None
+    finally:
+        sys.path.remove(str(tools))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", choices=("codex", "claude", "both", "generic"), default="both")
@@ -192,6 +213,10 @@ def main(argv=None):
                 # Never promise automatic recording that is not wired up (#21).
                 warnings.append("Codex is NOT connected to background memory: " + notify_status)
         codex_unwired = bool(warnings)
+        if background and not args.uninstall:
+            agent_warning = missing_agent(home)
+            if agent_warning:
+                warnings.append(agent_warning)  # Say it at install time, not only in `pending` (#71).
 
         def rules(home):
             if not background:

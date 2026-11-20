@@ -265,7 +265,10 @@ class GlobalQAMatrix(unittest.TestCase):
                 # Chinese prose after a colon describes the credential (found in self-QA of #66).
                 '密碼：請向管理員索取', '密碼：不要寫進筆記', '憑證：已過期', '密碼：同上', '密碼：無',
                 '密碼：每 90 天更換一次', 'API 金鑰：由使用者在執行時輸入', '令牌：從 vault 取得', '密碼：（略）',
-                '密钥：保存在环境变量 QA_KEY 中', '密碼存在 1Password', '密碼政策：至少 12 碼']
+                '密钥：保存在环境变量 QA_KEY 中', '密碼存在 1Password', '密碼政策：至少 12 碼',
+                # Prose about a credential is kept; only a digit-bearing token after `is`/`是` is a value (#74).
+                'password is required', 'token is expired', '密碼是必填', 'password is 8 characters',
+                'max token is 4096', '密碼是 8 碼', 'the token is stored in 1Password', 'token limit is 8000']
     CREDENTIALS = [('password="0427"', '0427'), ('password=581', '581'), ('mysql --password 7391 -u qa', '7391'),
                    ('token: qaopaquelettersonly', 'qaopaquelettersonly'),
                    ('api_key=sk-qa0123456789abcdefghij', 'qa0123456789abcdefghij'),
@@ -273,7 +276,9 @@ class GlobalQAMatrix(unittest.TestCase):
                    ('password=測試甲', '測試甲'), ('密碼：測試乙', '測試乙'),
                    ('--password "échantillon exemple"', 'échantillon exemple'),
                    ('密碼：(qa123abc)', 'qa123abc'), ('密碼：用qa77secret', 'qa77secret'),
-                   ('密碼=請勿外流丁', '請勿外流丁'), ('密碼：「測試丙」', '測試丙')]
+                   ('密碼=請勿外流丁', '請勿外流丁'), ('密碼：「測試丙」', '測試丙'),
+                   ('my password is 4417', '4417'), ('密碼是 6630', '6630'), ('the token was qa5521tok', 'qa5521tok'),
+                   ('api key is 7788', '7788')]
 
     def test_ordinary_values_survive_and_credentials_are_caught_in_ledger_and_notes(self):
         c = self.project('ordinary')
@@ -590,6 +595,74 @@ else:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(report['rebuilt'])
             self.assertTrue(recall(p, 'QA_CODEX_PREF_REBUILD'))
+
+
+    # --- invariant 6: a damaged store heals itself or names the file to fix, on every entry ------
+    def test_damaged_store_heals_or_names_the_file_on_every_entry(self):
+        """#77 #78 #79: never 'all memory gone' silently, never a dead end without a path."""
+        def seeded(label):
+            folder = self.project('damage-' + label)
+            ref = self.append(folder, 'prompt', {'text': 'QA: project rule and link'})
+            for key, kind in (('damage-proj', 'project'), ('damage-ref', 'reference')):
+                result = self.run_py(self.runtime, '--config', self.config, '--project', folder, 'remember',
+                                     '--scope', 'project', '--type', kind, '--subject', 'qa', '--key', key,
+                                     '--value', 'VALUE_' + key + '_' + label, '--why', '來源：ledger ' + ref, dream=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+            return folder, ref
+
+        def entries(folder, ref, label):
+            yield 'index', self.run_py(self.runtime, '--config', self.config, '--project', folder, 'index')
+            yield 'context', self.run_py(self.runtime, '--config', self.config, '--project', folder, 'context')
+            yield 'remember', self.run_py(self.runtime, '--config', self.config, '--project', folder, 'remember',
+                                          '--scope', 'project', '--subject', 'qa', '--key', 'after-' + label,
+                                          '--value', 'VALUE_after_' + label, '--why', '來源：ledger ' + ref, dream=True)
+            event = {'hook_event_name': 'SessionStart', 'session_id': 'qa', 'cwd': str(folder), 'source': 'startup'}
+            yield 'claude hook', self.run_py(self.hook, '--config', self.config, '--jason-hook',
+                                             stdin=json.dumps(event))
+
+        for label in ('missing-index', 'oversized-note'):
+            folder, ref = seeded(label)
+            store = self.store(folder)
+            if label == 'missing-index':
+                (store / 'MEMORY.md').unlink()
+            else:
+                (store / 'feedback').mkdir(exist_ok=True)
+                (store / 'feedback/preference-qa-huge.md').write_bytes(
+                    b'---\nname: preference-qa-huge\n---\n\n' + b'x' * (4 * 1024 * 1024 + 10))
+            for entry, result in entries(folder, ref, label):
+                with self.subTest(damage=label, entry=entry):
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    if entry in ('index', 'claude hook'):
+                        names = [p.relative_to(store).as_posix() for p in store.rglob('*.md')
+                                 if 'archive' not in p.parts and p.name != 'MEMORY.md']
+                        for name in names:
+                            self.assertIn(name, result.stdout)
+                    if entry == 'claude hook':
+                        self.assertNotIn('CONFLICT:', result.stdout)
+            if label == 'oversized-note':
+                kept = list((store / 'archive/quarantine').rglob('preference-qa-huge.md'))
+                self.assertEqual(len(kept), 1)
+                self.assertEqual(kept[0].stat().st_size, len(b'---\nname: preference-qa-huge\n---\n\n') + 4 * 1024 * 1024 + 10)
+
+        for label, where in (('project-journal', 'store'), ('global-journal', 'home')):
+            folder, ref = seeded(label)
+            journal = (self.store(folder) / '.transaction.json' if where == 'store'
+                       else self.home / '.rebuild-transaction.json')
+            journal.write_text('{"id": ', encoding='utf-8')
+            try:
+                for entry, result in entries(folder, ref, label):
+                    with self.subTest(damage=label, entry=entry):
+                        shown = result.stdout + result.stderr
+                        if entry == 'claude hook':
+                            self.assertEqual(result.returncode, 2, shown)  # Reported, with the file to fix.
+                        else:
+                            self.assertNotEqual(result.returncode, 0, shown)
+                        self.assertIn(journal.name, shown)
+                        self.assertIn('move it out of the memory folder', shown)
+            finally:
+                journal.unlink()
+            result = self.run_py(self.runtime, '--config', self.config, '--project', folder, 'index')
+            self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == '__main__':

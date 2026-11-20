@@ -76,6 +76,11 @@ def main(argv=None):
             result.update(codex_config=str(toml), codex_notify=status)
             if background and not args.uninstall and status.startswith('skipped: another'):
                 result['warnings'] = ['Codex is NOT connected to background memory: ' + status]
+        if not args.uninstall and (cfg.get('ledger') or {}).get('enabled') is True:
+            import memory_dream
+            if memory_dream.agent_command({'dream_agent': (cfg.get('ledger') or {}).get('dream_agent', 'auto')}) is None:
+                # Say it now, not only later in `pending` (#71).
+                result.setdefault('warnings', []).append(memory_dream.NO_AGENT)
         print(json.dumps(result))
         return 0
     except (OSError, ValueError, TypeError) as exc:

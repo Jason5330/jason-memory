@@ -1121,10 +1121,11 @@ class WindowsNoConsoleWindowTests(unittest.TestCase):
         flags = popen.call_args.kwargs['creationflags']
         self.assertTrue(flags & 0x08000000)          # CREATE_NO_WINDOW
         self.assertFalse(flags & 0x00000008)         # not DETACHED_PROCESS
-        with patch.object(subprocess, 'run') as run:
-            run.return_value.returncode, run.return_value.stdout = 0, b'JASON_DREAM_STATUS: ok'
-            dream._run_agent(['agent'], '', {}, Path.cwd())
-        self.assertTrue(run.call_args.kwargs['creationflags'] & 0x08000000)
+        with patch.object(subprocess, 'Popen') as agent:
+            agent.return_value.returncode = 0
+            agent.return_value.stdout.read.return_value = b'JASON_DREAM_STATUS: ok'
+            self.assertEqual(dream._run_agent(['agent'], '', {}, Path.cwd()), 0)
+        self.assertTrue(agent.call_args.kwargs['creationflags'] & 0x08000000)
 
 if __name__ == '__main__':
     unittest.main()

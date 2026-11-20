@@ -497,6 +497,13 @@ def main(argv):
         issues.append(f"index over configured budget ({' and '.join(over)}): "
                       f"{nlines} lines / {_kb(nbytes)} — review and compact it")
 
+    # An interrupted save leaves a journal that the runtime replays on its next command. One still
+    # present here means it was not (or could not be) replayed: every runtime command may fail (#79).
+    for journal in ('.transaction.json', '.pending.json'):
+        if os.path.lexists(os.path.join(root, journal)):
+            issues.append(f"unfinished save journal present: {os.path.join(root, journal)} — run any memory "
+                          "command to replay it; if that fails, back the file up and move it out of the store")
+
     # note files (by basename; a store uses unique slugs), excluding the top-level
     # templates/ & archive/ dirs only. Match on the FIRST path component, not a raw
     # string prefix, so a sibling like "templates-old/" is still checked and a

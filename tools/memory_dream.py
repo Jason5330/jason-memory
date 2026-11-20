@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 
 import memory_ledger as ledger
 import memory_runtime as runtime
@@ -128,6 +129,40 @@ def _codex_command(base, writable):
     return base[:-1] + ['--add-dir', str(writable)] + base[-1:]
 
 
+NO_AGENT = ('Jason-memory dream: no agent CLI found (claude/codex) on PATH or in the usual install locations. '
+            'Notes are not being consolidated, but every conversation is still recorded in the raw ledger and '
+            'nothing is lost. Install/log in to Claude Code or Codex CLI, or set ledger.dream_agent to the full '
+            'command, e.g. ["C:/path/to/claude.exe", "-p", "--allowedTools", "Bash(python:*)", "Read"].')
+
+
+def _candidates(name):
+    """Where the CLIs live when the host did not put them on PATH (#71): the VS Code extension's
+    bundled claude, the native installer and npm's global bin."""
+    home = Path.home()
+    exe = '.exe' if os.name == 'nt' else ''
+    found = []
+    if name == 'claude':
+        for editor in ('.vscode', '.vscode-insiders', '.cursor', '.windsurf'):
+            extensions = sorted((home / editor / 'extensions').glob('anthropic.claude-code-*'),
+                                key=lambda p: p.stat().st_mtime, reverse=True)
+            found += [e / 'resources/native-binary' / ('claude' + exe) for e in extensions]
+        found.append(home / '.local/bin' / ('claude' + exe))
+        found.append(home / '.claude/local' / ('claude' + exe))
+    appdata = os.environ.get('APPDATA')
+    if appdata:
+        found.append(Path(appdata) / 'npm' / (name + '.cmd'))
+    found.append(home / '.npm-global/bin' / name)
+    return [p for p in found if p.is_file()]
+
+
+def locate(name):
+    on_path = shutil.which(name)
+    if on_path:
+        return on_path
+    candidates = _candidates(name)
+    return str(candidates[0]) if candidates else None
+
+
 def agent_command(opts, writable=None):
     """Built-in agent command. `writable` is the memory home the worker must write to."""
     agent = opts.get('dream_agent', 'auto')
@@ -135,9 +170,10 @@ def agent_command(opts, writable=None):
         return agent
     names = ['claude', 'codex'] if agent == 'auto' else [agent]
     for name in names:
-        if name in AGENTS and shutil.which(AGENTS[name][0]):
+        executable = locate(AGENTS[name][0]) if name in AGENTS else None
+        if executable:
             command = list(AGENTS[name])
-            command[0] = shutil.which(command[0])
+            command[0] = executable
             return _claude_command(command) if name == 'claude' else _codex_command(command, writable)
     return None
 
@@ -165,13 +201,18 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
         return 0
     command = agent_command(opts, home) if runner is None else ['injected-runner']
     if command is None:
-        print('Jason-memory dream: no agent CLI found (claude/codex); set ledger.dream_agent', file=sys.stderr)
+        print(NO_AGENT, file=sys.stderr)
         return 127
     env = dict(os.environ, JASON_DREAM='1')
-    run = runner or (lambda cmd, text: _run_agent(cmd, text, env, project))
+    timeout = opts.get('dream_timeout', 1800)
+    run = runner or (lambda cmd, text: _run_agent(cmd, text, env, project, timeout))
     for lines in chunks(records, store):
         try:
             code = run(command, build_prompt(lines, index_text, prefix, tcfg.get('mode') == 'global'))
+        except subprocess.TimeoutExpired:
+            print('Jason-memory dream: agent timed out after ' + str(timeout) + ' s (ledger.dream_timeout); '
+                  'records stay pending and retry later', file=sys.stderr)
+            return 124
         except (OSError, subprocess.SubprocessError) as exc:
             print('Jason-memory dream: agent failed to run: ' + type(exc).__name__, file=sys.stderr)
             return 127 if isinstance(exc, OSError) else 124
@@ -180,16 +221,56 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
     return 0
 
 
-def _run_agent(command, text, env, project):
-    """Run the agent; success needs exit 0 AND its explicit ok status line (else retry later)."""
-    result = subprocess.run(command, input=text.encode('utf-8'), env=env, cwd=str(project),
-                            creationflags=ledger.NO_WINDOW,
-                            stdout=subprocess.PIPE, timeout=1800)
-    output = result.stdout.decode('utf-8', 'replace')
+def _kill_tree(process):
+    """Stop the agent and everything it started (claude.cmd -> node), so nothing keeps running or
+    holds the output pipe after a timeout (#73)."""
+    if os.name == 'nt':
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, creationflags=ledger.NO_WINDOW)
+    else:
+        import signal
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except OSError:
+            pass
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def _run_agent(command, text, env, project, timeout=1800):
+    """Run the agent; success needs exit 0 AND its explicit ok status line (else retry later).
+    The prompt is written from a thread: subprocess.run writes stdin synchronously on Windows, so an
+    agent that stops reading would make the timeout never fire (#73)."""
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, cwd=str(project),
+                               creationflags=ledger.NO_WINDOW, start_new_session=os.name != 'nt')
+    chunks = []
+
+    def feed():
+        try:
+            process.stdin.write(text.encode('utf-8'))
+            process.stdin.close()
+        except OSError:
+            pass
+
+    def read():
+        chunks.append(process.stdout.read())
+    threads = [threading.Thread(target=feed, daemon=True), threading.Thread(target=read, daemon=True)]
+    for thread in threads:
+        thread.start()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _kill_tree(process)
+        process.wait(timeout=30)
+        raise
+    threads[1].join(timeout=30)
+    output = b''.join(chunks).decode('utf-8', 'replace')
     sys.stdout.write(output)
     sys.stdout.flush()
-    if result.returncode:
-        return result.returncode
+    if process.returncode:
+        return process.returncode
     lines = [line.strip() for line in output.strip().splitlines() if line.strip()]
     return 0 if lines and lines[-1] == STATUS_OK else 75
 

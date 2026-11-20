@@ -30,8 +30,14 @@ import memory_runtime as runtime
 LEDGER = 'ledger.jsonl'
 TEXT_CAP = 64 * 1024  # Per-field cap for conversation text; longer content is truncated and marked.
 STALE_SECONDS = 3600
+# A reservation without a pid belongs to a worker that is still being started. If nothing records
+# a pid within this grace, the starter died between claim and spawn (#80); the slot is free again.
+STARTING_GRACE = 120
+# After an agent timeout (exit 124) automatic retries wait this long; manual dream-run does not (#73).
+TIMEOUT_COOLDOWN = 600
+LOG_TAIL = 600  # Characters of worker output kept in last_error.
 NO_WINDOW = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
-DEFAULT_SETTINGS = {'enabled': False, 'dream_every': 20, 'dream_command': None,
+DEFAULT_SETTINGS = {'enabled': False, 'dream_every': 20, 'dream_command': None, 'dream_timeout': 1800,
                     'dream_agent': 'auto', 'foreground_writes': True}
 
 
@@ -44,6 +50,9 @@ def settings(config):
     merged = dict(DEFAULT_SETTINGS, **value)
     if not isinstance(merged['dream_every'], int) or merged['dream_every'] < 1:
         raise ValueError('ledger.dream_every must be a positive integer')
+    timeout = merged['dream_timeout']
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+        raise ValueError('ledger.dream_timeout must be a positive integer (seconds)')
     command = merged['dream_command']
     if command is not None and (not isinstance(command, list) or not all(isinstance(c, str) for c in command)):
         raise ValueError('ledger.dream_command must be a list of strings')
@@ -346,7 +355,10 @@ def _running(state):
     run = state.get('running')
     if not run or time.time() - run.get('started', 0) >= STALE_SECONDS:
         return False
-    return _alive(run['pid']) if run.get('pid') else True  # No pid yet: the job is still starting.
+    if run.get('pid'):
+        return _alive(run['pid'])
+    # No pid yet: the job is still starting - but only briefly (#80).
+    return time.time() - run.get('started', 0) < STARTING_GRACE
 
 
 def claim_job(root, kind, upto):
@@ -405,6 +417,9 @@ def maybe_dream(root, config, project, opts, spawn=None):
     head = len(records(root))
     if head - state['cursor'] < opts['dream_every'] or _running(state):
         return None
+    error = state.get('last_error') or {}
+    if error.get('code') == 124 and time.time() - error.get('at', 0) < TIMEOUT_COOLDOWN:
+        return None  # The agent just timed out; do not start another long wait on every event (#73).
     owner = claim_job(root, 'dream', head)
     if owner is None:
         return None
@@ -435,6 +450,21 @@ def _spawn(command):
     return subprocess.Popen(command, **kwargs)
 
 
+def _log_summary(log, code):
+    """The last lines the worker printed, redacted, so last_error says why (#71, #73)."""
+    try:
+        with open(log, 'rb') as stream:
+            stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, stream.tell() - 8192))
+            text = stream.read().decode('utf-8', 'replace')
+    except OSError:
+        text = ''
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    tail = memory_facts.redact(' | '.join(lines[-4:]))[-LOG_TAIL:]
+    label = {124: 'agent timed out', 127: 'agent CLI not found or not startable'}.get(code, 'exit code ' + str(code))
+    return label + (': ' + tail if tail else '') + ' (full output: ' + str(log) + ')'
+
+
 def dream_run(config, project, upto, opts, owner=None):
     """Run the consolidation command for records (cursor, upto]; advance the cursor only on success.
     Every failure path (bad ledger, missing executable, non-zero exit) clears this job and records
@@ -447,6 +477,11 @@ def dream_run(config, project, upto, opts, owner=None):
                 return 75  # Another job is running; try again later.
         elif (dream_state(root).get('running') or {}).get('owner') != owner:
             return 75  # Our reservation was replaced (stale); do not race the new owner.
+        else:
+            state = dream_state(root)
+            if not state['running'].get('pid'):
+                state['running']['pid'] = os.getpid()  # The worker records itself (#80).
+                _save_state(root, state)
         start = dream_state(root)['cursor']
         try:
             existing = verified_records(root)
@@ -460,12 +495,17 @@ def dream_run(config, project, upto, opts, owner=None):
     error = None
     if upto > start:
         # The command runs outside the writer lock so foreground recall and saves never wait for it.
+        log = raw_root(root) / 'dream.log'
         try:
-            code = subprocess.call(opts['dream_command'], env=env, cwd=str(project), stdin=subprocess.DEVNULL,
-                                   creationflags=NO_WINDOW)
+            # Keep the worker's output for diagnosis instead of discarding it (#73).
+            with open(log, 'wb') as stream:
+                code = subprocess.call(opts['dream_command'], env=env, cwd=str(project), stdin=subprocess.DEVNULL,
+                                       stdout=stream, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
         except OSError as exc:
             code = 127
             error = 'cannot start dream_command: ' + type(exc).__name__
+        if code and error is None:
+            error = _log_summary(log, code)
     else:
         code = 0
     with runtime.opened(config, project) as (_, _, roots):

@@ -55,7 +55,12 @@ def audit(notes):
             groups.setdefault((subject, predicate), {}).setdefault(value, []).append(path)
     conflicts = [{'subject': key[0], 'predicate': key[1], 'values': values}
                  for key, values in sorted(groups.items()) if len(values) > 1]
+    # The same fact kept in several notes is not a conflict yet, but a correction must change all of them (#76).
+    duplicates = [{'subject': key[0], 'predicate': key[1], 'value': value, 'paths': paths}
+                  for key, values in sorted(groups.items()) for value, paths in sorted(values.items())
+                  if len(set(paths)) > 1]
     return {'conflicts': conflicts, 'invalid_facts': errors, 'semantic_review_needed': review,
+            'duplicates': duplicates,
             'facts': [{'subject': k[0], 'predicate': k[1], 'values': v} for k, v in sorted(groups.items())]}
 
 
@@ -191,7 +196,33 @@ _CJK_PROSE = re.compile(
     r'（(?:略|無|无|空|待定|未設定|未设定|不提供)）')
 
 
+# `password is 0427`, `the token was hunter2`, `密碼是 1234` (#74): a credential name joined to its value
+# by a verb instead of `=`/`:`. Prose is ambiguous (`password is required`, `token is expired`,
+# `password is 8 characters`), so this form only counts an ASCII token that contains a digit, is not
+# followed by a unit, and whose name is not qualified as a limit or count (`max token is 4096`).
+_PROSE = re.compile(
+    r'(?i)(?:(?<![A-Za-z0-9_.\\-])|(?<=\\[nrt]))(?P<name>' + _NAME[3:-1] + r'|api\s+key|access\s+key|access\s+token|secret\s+key|'
+    r'private\s+key|auth\s+token)'
+    r'(?:\s+(?:is|was|are|were)(?:\s+(?:now|still|set\s+to|changed\s+to))?\s+|\s*(?:是|為|为|設為|设为|改成|改為|改为)\s*)'
+    r'(?:"(?P<dq>[^"\\\n]*)"|\'(?P<sq>[^\'\\\n]*)\'|(?P<value>[A-Za-z0-9!@#$%^&*_+\-.~/]+))')
+_PROSE_UNIT = re.compile(r'(?i)\s*(?:characters?|chars?|digits?|letters?|long|bytes?|days?|hours?|minutes?|'
+                         r'seconds?|tokens?|times?|位|碼|码|個|个|字元?|天|小時|小时|分鐘|分钟|秒|次)')
+_PROSE_QUALIFIER = re.compile(r'(?i)(?:(?:(?<![A-Za-z])|(?<=\\[nrt]))(?:max|min|maximum|minimum|limit|count|number\s+of|length|num)|'
+                              r'最大|最小|上限|下限|長度|长度)[\s_-]*$')
+
+
+def _prose_credential(match, value):
+    if match['value'] is not None and (not re.search(r'\d', value) or
+                                       _PROSE_UNIT.match(match.string, match.end('value'))):
+        return False
+    if _PROSE_QUALIFIER.search(match.string[max(0, match.start() - 24):match.start()]):
+        return False
+    return credential_value(match['name'], value)
+
+
 def _matched_credential(match, value):
+    if match.re is _PROSE:
+        return _prose_credential(match, value)
     # Only a location description or Chinese prose after a colon gets the prose exception.
     # Match the variable name too: an arbitrary non-ASCII string may be the credential itself.
     if match.re is _ASSIGNED and match['separator'] in (':', '：'):
@@ -210,7 +241,7 @@ def note_has_credential(text):
     assigned to a credential name (password=0427, token: lettersonly), judged like the ledger masker."""
     if secret_values(text):
         return True
-    for pattern in (_ASSIGNED, _FLAG):
+    for pattern in (_ASSIGNED, _FLAG, _PROSE):
         for match in pattern.finditer(text):
             value = next(v for v in (match.group('dq'), match.group('sq'), match.group('value')) if v is not None)
             if _matched_credential(match, value):
@@ -230,4 +261,5 @@ def redact(text):
     text = _COOKIE_LINE.sub(lambda m: m.group('head') + _COOKIE_VALUE.sub('=[REDACTED]', m.group('body')), text)
     text = _USERINFO.sub(lambda m: m.group('head') + ':[REDACTED]@', text)
     text = _FLAG.sub(_mask_value, text)
+    text = _PROSE.sub(_mask_value, text)
     return _ASSIGNED.sub(_mask_value, text)
