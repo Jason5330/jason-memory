@@ -537,7 +537,7 @@ class BackgroundModeTests(Base):
             # The agent writes to the staging store named in its prompt, never the live one.
             import re
             self.assertIn('更正：標題改用淡紫色', text)
-            staging = Path(re.search(r"--config '?([^'\s]+\.jason-memory\.json)", text).group(1))
+            staging = Path(re.search(r"""--config ['"]?([^'"\s]+\.jason-memory\.json)""", text).group(1))
             self.assertNotEqual(staging.resolve(), self.config.resolve())
             with runtime.opened(staging) as (_, _, roots):
                 runtime.remember(roots['project'], 'user', 'header.color', '淡紫色', '來源：ledger seq 2')
@@ -636,7 +636,7 @@ class BackgroundModeTests(Base):
 
         def replaced(cmd, text):
             import re
-            staging = Path(re.search(r"--config '?([^'\s]+\.jason-memory\.json)", text).group(1))
+            staging = Path(re.search(r"""--config ['"]?([^'"\s]+\.jason-memory\.json)""", text).group(1))
             with runtime.opened(staging) as (_, _, roots):
                 runtime.remember(roots['project'], 'user', 'rebuilt', '新值', '來源：ledger seq 1')
             with runtime.opened(self.config):

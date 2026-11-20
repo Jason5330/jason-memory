@@ -13,6 +13,7 @@ from urllib.parse import unquote
 
 import memory_runtime as runtime
 import memory_ledger as ledger
+import hook_settings
 from hook_settings import EVENTS, TOOL_EVENTS
 
 LIMIT = 8000  # Characters; stay below Claude's large additionalContext file-fallback threshold.
@@ -57,9 +58,8 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
             'Never announce routine memory reading. Archives are not current facts.\n'
             + 'Config: ' + str(config) + '\nActive project: ' + str(project) + '\n')
     head += 'Runtime: ' + str(Path(runtime.__file__).resolve()) + '\n'
-    command = ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(),
-                      Path(runtime.__file__).resolve().as_posix(), '--config', Path(config).as_posix(),
-                      '--project', Path(project).as_posix()))
+    command = hook_settings.shell_join((hook_settings.python_command(), Path(runtime.__file__).resolve().as_posix(),
+                                        '--config', Path(config).as_posix(), '--project', Path(project).as_posix()))
     head += ('Command prefix (Bash): ' + command + '\n'
              'Append: remember --scope project --type feedback --subject user --key STABLE_KEY --value "REQUIREMENT" --why "USER_EVIDENCE"\n'
              '--type user for identity/role, project for project constraints, feedback for preferences. '
@@ -97,6 +97,13 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
             lines.append('DUPLICATE FACTS (same value in several notes; a correction must update all of them in one '
                          'plan): ' + '; '.join(d['subject'] + '/' + d['predicate'] + ' in ' + ', '.join(d['paths'])
                                                for d in duplicates)[:600] + '\n')
+        drift = info['audit'].get('fact_drift') or []
+        if drift:
+            # The prose an agent follows no longer says what the recorded fact says (#86).
+            lines.append('FACT DRIFT (note text edited outside the runtime no longer states its recorded fact; '
+                         'do not follow either until the user confirms, then correct the note with apply): '
+                         + '; '.join(d['path'] + ' records ' + d['subject'] + '/' + d['predicate'] + '='
+                                     + json.dumps(d['value'], ensure_ascii=False)[:80] for d in drift)[:700] + '\n')
         sections.append((scope, lines))
         all_rows[scope] = [line for line in info.get('index', '').splitlines() if line.startswith('- [')]
         # Who the user is and what they asked for first; within a type, path order (#83).
@@ -629,6 +636,8 @@ def failed(event, config, exc):
     without memory. Only the direct-write guard stays strict for memory paths."""
     name = event.get('hook_event_name') if isinstance(event, dict) else None
     command = ' '.join(shlex.quote(p) for p in (sys.executable, str(Path(__file__).resolve()), '--config', str(config)))
+    if getattr(exc, 'winerror', None) == 206:
+        exc = OSError(str(exc) + ' - ' + hook_settings.LONG_PATH_HINT)  # Not a missing file (#99).
     reason = ('Jason-memory hook failed: ' + str(exc) + ' (hook: ' + command + '). Memory is unavailable for this '
               'event; the conversation continues. Diagnose with: ' + shlex.quote(sys.executable) + ' '
               + shlex.quote(str(Path(__file__).resolve().with_name('jason_doctor.py'))) + ' MEMORY_ROOT; '

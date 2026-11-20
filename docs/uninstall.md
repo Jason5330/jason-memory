@@ -7,6 +7,8 @@
 **雙擊就會永久刪除，沒有資源回收筒或自動備份。** 不想刪除時不要執行。
 只想查看刪除清單，從命令列執行 `UNINSTALL.bat --dry-run`，不會改動檔案。
 
+在 Jason-memory 的原始碼 checkout（含 `.git` 與 `.github/release-notes/`）裡執行時會拒絕刪除：那裡的記憶庫不受 Git 保護，刪了救不回來（#97）。確定要清除該 checkout 時先用 `memory_runtime.py export` 匯出記憶，再加 `--force`；要清除其他專案則用 `--project` 指定。
+
 預設一次處理：
 
 - BAT 所在資料夾：依 `.jason-memory.json` 清除本專案記憶庫，包括索引、筆記、

@@ -177,6 +177,12 @@ def main(argv=None):
     try:
         profile = absolute(args.user_home) if args.user_home else Path.home().resolve()
         home = absolute(args.home) if args.home else profile / ".jason-memory-global"
+        # Deepest paths every conversation needs: shared hook state and a project store's files (#99).
+        too_long = hook_settings.path_too_long(
+            home, ["memory/shared/" + depth for depth in hook_settings.STORE_DEPTHS]
+            + ["memory/projects/" + "f" * 64 + "/" + depth for depth in hook_settings.STORE_DEPTHS[1:]])
+        if too_long and not args.uninstall:
+            raise ValueError(too_long)
         codex_env = None if args.user_home else os.environ.get("CODEX_HOME")
         claude_env = None if args.user_home else os.environ.get("CLAUDE_CONFIG_DIR")
         codex = absolute(args.codex_home or codex_env or profile / ".codex")
@@ -255,8 +261,9 @@ def main(argv=None):
                 raise ValueError('Redirected Claude settings are not supported')
             original = settings.read_bytes() if settings.exists() else b''
             script = home / 'framework/tools/claude_memory_hook.py'
-            command = ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(), script.as_posix(),
-                              '--config', (home / 'framework/memory-config.json').as_posix(), '--jason-hook'))
+            # Double quotes (#98); the interpreter stays absolute: the hook runs before any PATH lookup is safe.
+            command = hook_settings.shell_join((Path(sys.executable).as_posix(), script.as_posix(), '--config',
+                                                (home / 'framework/memory-config.json').as_posix(), '--jason-hook'))
             updated = (hook_settings.merged(original, owned_script=script) if args.uninstall
                        else hook_settings.merged(original, command))
             if updated != original and (not args.uninstall or original):

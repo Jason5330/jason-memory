@@ -38,12 +38,12 @@ def hook_command(root, config):
     project keeps its absolute path. The interpreter stays absolute: a missing interpreter is a
     non-blocking hook error, while a bare `python` may be absent from PATH or be another install."""
     script = (Path(__file__).resolve().parent / 'claude_memory_hook.py')
-    python = shlex.quote(Path(sys.executable).as_posix())
+    python = hook_settings.shell_quote(Path(sys.executable).as_posix())
     try:
         relative = script.relative_to(root).as_posix()
     except ValueError:
-        return ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(), script.as_posix(),
-                                                  '--config', config.as_posix(), '--jason-hook'))
+        return hook_settings.shell_join((Path(sys.executable).as_posix(), script.as_posix(),
+                                         '--config', config.as_posix(), '--jason-hook'))
     return (python + ' "$CLAUDE_PROJECT_DIR/' + relative + '" --config "$CLAUDE_PROJECT_DIR/'
             + config.relative_to(root).as_posix() + '" --jason-hook')
 
@@ -63,6 +63,14 @@ def main(argv=None):
         if not config.is_file():
             raise ValueError('Missing .jason-memory.json; configure the canonical project root first')
         cfg, _, _, _ = memory_runtime.configuration(config)
+        framework = Path(__file__).resolve().parents[1]
+        problem = hook_settings.path_too_long(root, [p.relative_to(root).as_posix() for p in
+                                                     framework.rglob('*.py') if root in p.parents] or ['tools'] )
+        store = memory_runtime.configuration(config)[3]['project']
+        problem = problem or hook_settings.path_too_long(store, hook_settings.STORE_DEPTHS)
+        if problem and not args.uninstall:
+            # A hook whose script Windows cannot open exits 2 and blocks every prompt: refuse up front.
+            raise ValueError(problem)
         result = {'dry_run': args.dry_run, 'memories_preserved': True}
         if args.agent in ('both', 'claude'):
             target = memory_runtime.storelib.safe(root / '.claude/settings.json', root)

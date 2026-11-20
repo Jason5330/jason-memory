@@ -198,6 +198,10 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 
 Claude hook 遇到任何錯誤（記憶庫損壞、設定檔不見、專案搬移後設定不符）都不擋下使用者的提示：以 exit 0 回傳 `systemMessage`，並在新對話／提示的上下文加一行 `MEMORY UNAVAILABLE`，寫出失敗原因與 hook 命令；只有寫入記憶資料夾的工具呼叫仍會被拒絕（#87）。安裝器寫入的 hook 命令以 `$CLAUDE_PROJECT_DIR` 指向專案內的腳本與設定，搬移或改名專案資料夾不需重裝；Python 直譯器仍是絕對路徑，升級後找不到直譯器時 Claude Code 只顯示錯誤、不擋提示，重新執行 `INSTALL.cmd` 即可。
 
+整理進度檔 `.raw/dream.json` 無法讀取時，原檔改名保留為 `dream.json.corrupt-<時間>`，進度從頭開始（重新整理同一事實不會改變筆記），帳本照常記錄；`pending` 的 `state_reset` 寫出保留位置（#95）。`rebuild` 在帳本沒有對話紀錄，或重播完全沒有產生筆記時拒絕發佈，既有筆記保持不變（#96）。`remember` 產生的筆記若正文已不再寫出它記錄的事實值（在 runtime 之外被改過），audit 的 `fact_drift` 與快照的 `FACT DRIFT` 會點名；不列入 `invalid_facts`，以免一則被改的筆記讓所有保存都失敗（#86）。
+
+hook 命令與指令前綴使用雙引號（Git Bash、sh 與 cmd.exe 都接受）；`python` 就是同一個直譯器時，給代理的指令前綴改用 `python`，在需要逐一核准絕對路徑的環境較少被攔（#98、#87）。Windows 未開啟長路徑支援時，安裝器會先檢查專案與記憶庫最深的路徑，超過 260 字元就拒絕安裝並說明；執行中遇到 WinError 206 也會說明是路徑長度限制（#99）。
+
 `--scope` 在所有子指令意義相同：`index`、`export` 指定不存在的 scope 時回 `Unavailable scope`；不指定時涵蓋全部 store，`export` 的結果列出 `scopes`（#88）。只有 `local:…`，或 16 位 store 加 12 位雜湊的完整引用格式，或寫在「來源／Source／ledger」標示旁的文字，才會被當成帳本引用驗證；一般句子或網址裡的 git SHA 前綴照原文保存（#89）。
 
 新對話快照內嵌常駐筆記時只放正文與 Why（不含 frontmatter、jason-facts 與重複的 How to apply），每則最多 1,200 字，已內嵌的筆記不在索引重列；索引至少保留 1,000 字作導覽，放不下的常駐筆記在索引中排最前，並由 `PARTIAL SNAPSHOT` 寫明未送達與被縮短的數量（#91）。

@@ -438,8 +438,8 @@ import json, os, re, subprocess, sys
 from pathlib import Path
 text = sys.stdin.buffer.read().decode('utf-8')
 prefix = next(line for line in text.splitlines() if line.startswith('指令前綴（Bash）：'))
-target = re.search(r"--config (?:'([^']+)'|(\S+))", prefix)
-config = next(v for v in target.groups() if v)
+target = re.search(r"--config (?:'([^']+)'|\"((?:[^\"\\]|\\.)+)\"|(\S+))", prefix)
+config = re.sub(r'\\(.)', r'\1', next(v for v in target.groups() if v))
 runtime = sys.argv[1]
 def run(*args, stdin=None):
     return subprocess.run([sys.executable, runtime, '--config', config, '--project', str(Path.cwd()), *args],

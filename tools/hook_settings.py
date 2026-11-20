@@ -11,6 +11,70 @@ EVENTS = ('SessionStart', 'UserPromptSubmit', 'PreToolUse', *TOOL_EVENTS, 'Stop'
 MARKER = '--jason-hook'
 
 
+def shell_quote(text):
+    """Quote one argument for the shell that runs hooks and the agent's Bash tool (#98): double quotes,
+    which Git Bash (Claude Code's hook shell on Windows), sh and cmd.exe all accept, unlike POSIX single
+    quotes. Inside them only the characters bash still expands are escaped."""
+    text = str(text)
+    if text and all(c.isalnum() or c in '-_./:=@%+,' for c in text):
+        return text
+    if '"' in text:
+        raise ValueError('A path containing a double quote cannot be used in a hook command: ' + text)
+    return '"' + text.replace('\\', '\\\\').replace('$', '\\$').replace('`', '\\`') + '"'
+
+
+def shell_join(parts):
+    return ' '.join(shell_quote(p) for p in parts)
+
+
+MAX_PATH = 259  # Characters Windows allows in a full path unless long paths are enabled.
+LONG_PATH_HINT = ('Windows limits paths to 260 characters unless long paths are enabled: move the project to a '
+                  'shorter folder, or enable "LongPathsEnabled" (Windows long path support) and restart')
+
+
+def long_paths_enabled():
+    if _os.name != 'nt':
+        return True
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'SYSTEM\CurrentControlSet\Control\FileSystem') as key:
+            return winreg.QueryValueEx(key, 'LongPathsEnabled')[0] == 1
+    except OSError:
+        return False
+
+
+def path_too_long(base, relatives):
+    """The longest full path the framework will need under `base`, if Windows cannot open it (#99)."""
+    if long_paths_enabled():
+        return None
+    longest = max(relatives, key=len)
+    full = len(str(_Path(base))) + 1 + len(longest)
+    if full > MAX_PATH:
+        return ('Path too long for Windows: ' + str(base) + ' needs paths of ' + str(full) + ' characters (for example '
+                + longest + '), over the ' + str(MAX_PATH + 1) + '-character limit. ' + LONG_PATH_HINT + '.')
+    return None
+
+
+# Deepest paths every conversation needs inside a store: hook state (sha256 name) and a set-aside
+# progress file (#95). Rare deeper paths (a quarantined note) report WinError 206 with a hint instead.
+STORE_DEPTHS = ('.hook-state/' + 'f' * 64 + '.json', '.raw/dream.json.corrupt-20261120-170049-3ef571')
+
+
+def python_command():
+    """`python` (or `python3`) when that name on PATH is this same interpreter: a short command needs no
+    per-path approval in sandboxed agents (#87). Otherwise the absolute interpreter path."""
+    import shutil
+    import sys
+    for name in ('python', 'python3'):
+        found = shutil.which(name)
+        try:
+            if found and _os.path.samefile(found, sys.executable):
+                return name
+        except OSError:
+            continue
+    return _Path(sys.executable).as_posix()
+
+
 def managed_home(block):
     # Both generated Markdown variants contain one JSON block with a memory_home field.
     _, found, remainder = block.replace(b'\r\n', b'\n').partition(b'```json\n')

@@ -365,11 +365,18 @@ def make_plan(args):
     return root, homes, plan
 
 
+def source_checkout(root):
+    """The framework's development checkout: release notes and CI live only there, never in a package."""
+    return (root / '.git').exists() and (root / '.github/release-notes').is_dir()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('project', 'user-home', 'home', 'codex-home', 'claude-home'):
         parser.add_argument('--' + name)
     parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--force', action='store_true',
+                        help='also run inside the framework source checkout (deletes its untracked memory store)')
     args = parser.parse_args(argv)
     result = {'dry_run': args.dry_run, 'complete': False}
     try:
@@ -379,6 +386,14 @@ def main(argv=None):
                       edit=[str(p) for p, (_, new) in plan.files.items() if new is not None],
                       remaining=plan.remaining,
                       kept='Cleanup utility, unrelated files/settings, Git history and other project copies')
+        if source_checkout(root) and not args.dry_run and not args.force:
+            # The default target is the folder this tool sits in. In the framework's own source checkout
+            # that deletes the checkout and its untracked memory store, which Git cannot restore (#97).
+            raise ValueError('This folder is the Jason-memory source checkout (' + str(root) + '), not an installed '
+                             'package: uninstalling here deletes its files and its untracked memory store, which Git '
+                             'cannot restore. Run with --dry-run to see the list, export memory first (memory_runtime.py '
+                             'export --output FILE.md), and add --force only if you really mean it; to uninstall '
+                             'another project pass --project PATH.')
         if not args.dry_run:
             plan.execute()
         result['complete'] = not plan.remaining

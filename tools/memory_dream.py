@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 
+import hook_settings
 import memory_ledger as ledger
 import memory_runtime as runtime
 
@@ -54,10 +55,11 @@ STATUS_OK = 'JASON_DREAM_STATUS: ok'
 
 
 def runtime_prefix(config, project, cfg):
-    parts = [sys.executable, str(Path(runtime.__file__).resolve()), '--config', str(config)]
+    parts = [hook_settings.python_command(), Path(runtime.__file__).resolve().as_posix(), '--config',
+             Path(config).as_posix()]
     if cfg.get('mode') == 'global':
-        parts += ['--project', str(project)]
-    return ' '.join(shlex.quote(Path(p).as_posix() if i < 2 else p) for i, p in enumerate(parts))
+        parts += ['--project', Path(project).as_posix()]
+    return hook_settings.shell_join(parts)
 
 
 def render_record(record, store='local'):
@@ -180,6 +182,9 @@ def agent_command(opts, writable=None):
     return None
 
 
+REPLAYED_KINDS = ('prompt', 'assistant', 'tool', 'document', 'correction')
+
+
 def consolidate(config, project, start, upto, opts, runner=None, target=None):
     """Feed records start..upto to the agent. Non-zero means retry later; the cursor stays.
     The ledger is verified first; a broken or truncated source is never handed to a model.
@@ -191,8 +196,7 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
         except ValueError as exc:
             print('Jason-memory dream: ledger verification failed: ' + str(exc), file=sys.stderr)
             return 65
-        records = [r for r in existing if start <= r['seq'] <= upto
-                   and r.get('kind') in ('prompt', 'assistant', 'tool', 'document', 'correction')]
+        records = [r for r in existing if start <= r['seq'] <= upto and r.get('kind') in REPLAYED_KINDS]
         store = ledger.store_id(cfg, root)
     target = Path(target or config)
     with runtime.opened(target, project) as (tcfg, _, troots):
@@ -311,6 +315,10 @@ def rebuild(config, project, opts, runner=None):
             return dict(result, exit_code=65, error='ledger verification failed: ' + str(exc))
         head = len(records)
         head_hash = records[-1]['hash'] if records else None
+        if not any(r.get('kind') in REPLAYED_KINDS for r in records):
+            # Nothing to replay would publish an empty store and archive every note (#96).
+            return dict(result, exit_code=65, error='nothing to replay: the ledger has no conversation records; '
+                        'current notes kept')
         revisions = {scope: runtime.revision(path) for scope, path in roots.items()}
         global_mode = cfg['mode'] == 'global'
         shared_notes = runtime.notes(roots['global']) if global_mode else {}
@@ -368,6 +376,11 @@ def rebuild(config, project, opts, runner=None):
                     current_records = ledger.verified_records(root)
                     if head and (len(current_records) < head or current_records[head - 1]['hash'] != head_hash):
                         raise ValueError('Ledger changed during rebuild; retry')
+                    produced = bool(runtime.notes(staged['project'])) or (
+                        global_mode and runtime.notes(staged['global']) != shared_notes)
+                    if not produced and runtime.notes(root):
+                        # A replay that reproduces nothing is a failed replay, not an empty memory (#96).
+                        raise ValueError('the replay produced no notes; current notes kept')
                     plans = {}
                     archived = []
                     for scope, path in roots.items():
@@ -410,7 +423,7 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path)
     parser.add_argument('command', choices=['consolidate', 'prompt', 'rebuild'])
-    parser.add_argument('--yes', action='store_true', help='confirm rebuild (archives replaced notes)')
+    parser.add_argument('--yes', action='store_true', help='confirm rebuild: archives every current note the replay does not reproduce')
     args = parser.parse_args()
     config = args.config.absolute()
     project = Path(os.environ.get('JASON_MEMORY_PROJECT') or args.project or Path.cwd())

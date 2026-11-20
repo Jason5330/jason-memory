@@ -877,7 +877,12 @@ def main():
         emit_json(result)
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        emit_json({'error': str(exc)}, sys.stderr)
+        message = str(exc)
+        if getattr(exc, 'winerror', None) == 206:
+            # "File name too long" is a Windows path limit, not damage or a missing install (#99).
+            message += (' - Windows limits paths to 260 characters unless long paths are enabled: move the project '
+                        'to a shorter folder or enable LongPathsEnabled')
+        emit_json({'error': message}, sys.stderr)
         return 1
 
 

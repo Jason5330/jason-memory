@@ -41,8 +41,36 @@ def extract(content):
     return facts, bool(blocks)
 
 
+_DESCRIPTION = re.compile(r'^description:[ \t]*(.*?)[ \t]*$', re.M)
+_FENCED = re.compile(r'^(`{3,}|~{3,}).*?^\1[ \t]*$', re.M | re.S)
+
+
+def _fact_drift(content, facts):
+    """A note written by `remember` states its one fact in the body, and its description is that value.
+    When the body no longer contains the value, the prose was edited outside the runtime and now says
+    something the recorded fact does not (#86). Hand-written notes are not held to this."""
+    if len(facts) != 1 or not content.startswith('---'):
+        return None
+    head, found, body = content[3:].partition('\n---')
+    match = _DESCRIPTION.search(head) if found else None
+    if not match:
+        return None
+    description = match.group(1)
+    try:
+        description = json.loads(description) if description.startswith('"') else description
+    except ValueError:
+        return None
+    subject, predicate, value = facts[0]
+    if not isinstance(value, str) or not isinstance(description, str):
+        return None
+    generated = description == value or (description.endswith('…') and value.startswith(description[:-1]))
+    if not generated or value in _FENCED.sub('', body):
+        return None
+    return subject, predicate, value
+
+
 def audit(notes):
-    groups, review, errors = {}, [], []
+    groups, review, errors, drift = {}, [], [], []
     for path, content in sorted(notes.items()):
         try:
             facts, structured = extract(content)
@@ -51,6 +79,9 @@ def audit(notes):
             continue
         if not structured:
             review.append(path)
+        drifted = _fact_drift(content, facts)
+        if drifted:
+            drift.append({'path': path, 'subject': drifted[0], 'predicate': drifted[1], 'value': drifted[2]})
         for subject, predicate, value in facts:
             groups.setdefault((subject, predicate), {}).setdefault(value, []).append(path)
     conflicts = [{'subject': key[0], 'predicate': key[1], 'values': values}
@@ -60,7 +91,7 @@ def audit(notes):
                   for key, values in sorted(groups.items()) for value, paths in sorted(values.items())
                   if len(set(paths)) > 1]
     return {'conflicts': conflicts, 'invalid_facts': errors, 'semantic_review_needed': review,
-            'duplicates': duplicates,
+            'duplicates': duplicates, 'fact_drift': drift,
             'facts': [{'subject': k[0], 'predicate': k[1], 'values': v} for k, v in sorted(groups.items())]}
 
 

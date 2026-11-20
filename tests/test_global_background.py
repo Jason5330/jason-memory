@@ -193,8 +193,8 @@ from pathlib import Path
 
 text = sys.stdin.buffer.read().decode('utf-8')
 prefix = next(line for line in text.splitlines() if line.startswith('指令前綴（Bash）：'))
-target = re.search(r"--config (?:'([^']+)'|(\\S+))", prefix)
-config = next(value for value in target.groups() if value)
+args = __import__('shlex').split(prefix.split('：', 1)[1])  # Any quoting the shell accepts (#98).
+config = args[args.index('--config') + 1]
 ref = re.search(r'\\[ref (\\S+) ', text).group(1)
 subprocess.run([sys.executable, sys.argv[1], '--config', config, '--project', str(Path.cwd()),
                 'remember', '--scope', 'global', '--subject', 'qa', '--key', 'legacy',
@@ -260,8 +260,8 @@ from pathlib import Path
 
 text = sys.stdin.buffer.read().decode('utf-8')
 prefix = next(line for line in text.splitlines() if line.startswith('指令前綴（Bash）：'))
-target = re.search(r"--config (?:'([^']+)'|(\\S+))", prefix)
-config = next(value for value in target.groups() if value)
+args = __import__('shlex').split(prefix.split('：', 1)[1])  # Any quoting the shell accepts (#98).
+config = args[args.index('--config') + 1]
 scope = 'global' if '全局版範圍' in text else 'project'
 for scope, key, value in ((scope, 'shared', 'QA_REBUILT_SHARED'), ('project', 'local', 'QA_REBUILT_LOCAL')):
     subprocess.run([sys.executable, sys.argv[1], '--config', config, '--project', str(Path.cwd()),

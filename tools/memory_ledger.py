@@ -308,10 +308,46 @@ def _state_path(root):
 
 
 def dream_state(root):
+    """Consolidation progress. A damaged state file must not stop the ledger from recording (#95):
+    it is only progress, so it is kept as dream.json.corrupt-<time> for review and restarts at cursor 0
+    (re-consolidating is safe: saving an existing fact again changes nothing)."""
     path = _state_path(root)
-    state = runtime.read_json(path) if path.exists() else {}
-    state.setdefault('cursor', 0)
-    return state
+    for _ in range(3):
+        try:
+            state = runtime.read_json(path) if path.exists() else {}
+        except FileNotFoundError:
+            continue  # Another process just set it aside; read again.
+        except ValueError as exc:  # Not JSON / not UTF-8. A permission or disk error (OSError) is raised as is.
+            reason = str(exc)
+        else:
+            reason = _state_problem(state)
+            if reason is None:
+                state.setdefault('cursor', 0)
+                return state
+        kept = path.with_name(path.name + '.corrupt-' + time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6])
+        try:
+            os.replace(path, kept)
+        except FileNotFoundError:
+            continue
+        fresh = {'cursor': 0, 'state_reset': {'kept': str(kept), 'reason': reason[:200], 'at': time.time()}}
+        _save_state(root, fresh)
+        print('Jason-memory: consolidation state ' + str(path) + ' was unreadable (' + reason[:200] + '); kept it as '
+              + str(kept) + ' and restarted consolidation from the beginning (cursor 0)', file=sys.stderr)
+        return fresh
+    raise ValueError('Consolidation state keeps changing: ' + str(path))
+
+
+def _state_problem(state):
+    if not isinstance(state, dict):
+        return 'not a JSON object'
+    cursor = state.get('cursor', 0)
+    if isinstance(cursor, bool) or not isinstance(cursor, int) or cursor < 0:
+        return 'invalid cursor ' + repr(cursor)[:40]
+    if state.get('cursor_hash') is not None and not isinstance(state['cursor_hash'], str):
+        return 'invalid cursor_hash'
+    if state.get('running') is not None and not isinstance(state['running'], dict):
+        return 'invalid running reservation'
+    return None
 
 
 def _save_state(root, state):
@@ -323,6 +359,10 @@ def pending(root):
     total = len(records(root))
     result = {'cursor': state['cursor'], 'head': total, 'pending': max(0, total - state['cursor']),
               'running': state.get('running'), 'last_error': state.get('last_error')}
+    if state.get('state_reset'):
+        # Say which file was damaged and where it was kept (#95).
+        result['state_reset'] = dict(state['state_reset'], note='the consolidation state file was unreadable and was '
+                                     'reset to cursor 0; the damaged copy is kept at the path shown')
     run = state.get('running')
     if run and not _running(state):
         # The scheduler already ignores this reservation; do not show it as a live job (#84).
