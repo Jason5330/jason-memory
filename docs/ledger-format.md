@@ -49,7 +49,7 @@ SHA-256 必須等於檔名，大小必須等於 `size`。`verify` 與 `source --
 句子寫法也會遮蔽（#74）：`password is 0427`、`the token was qa1234`、`密碼是 1234` 等憑證名稱以 `is`／`was`／`是`／`為`／`改成`接上含數字的值。`password is required`、`token is expired`、`password is 8 characters`、`max token is 4096`、`密碼是必填` 這類說明保留。
 明確密碼欄位或參數中的短數字也會遮蔽。一般計量欄位如 `retry_count` 保留。
 
-雜湊鏈或已整理游標的 checkpoint 驗證不通過時（含截短、重新計算雜湊的改寫，#53），`append`、`mirror` 一律拒絕寫入，帳本保持原狀供診斷；Claude hook 只顯示警告、不阻擋對話（#51）。
+雜湊鏈或已整理游標的 checkpoint 驗證不通過時（含截短、重新計算雜湊的改寫，#53），`append`、`mirror` 一律拒絕寫入，帳本保持原狀供診斷；Claude hook 不阻擋對話（#51），警告同時顯示給使用者並以 `LEDGER WARNING` 寫入代理的上下文，代理才不會在記錄停擺時宣稱已記住（#92）。
 
 ## 各 kind 的 data
 

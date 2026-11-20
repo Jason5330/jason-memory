@@ -32,6 +32,22 @@ def write_with_backup(target, original, updated):
     memory_runtime.storelib.atomic_write(target, updated.decode('utf-8'))  # A BOM stays as U+FEFF.
 
 
+def hook_command(root, config):
+    """Script and config are named relative to the project through Claude Code's $CLAUDE_PROJECT_DIR,
+    so moving or renaming the project folder keeps the hook working (#87). A framework outside the
+    project keeps its absolute path. The interpreter stays absolute: a missing interpreter is a
+    non-blocking hook error, while a bare `python` may be absent from PATH or be another install."""
+    script = (Path(__file__).resolve().parent / 'claude_memory_hook.py')
+    python = shlex.quote(Path(sys.executable).as_posix())
+    try:
+        relative = script.relative_to(root).as_posix()
+    except ValueError:
+        return ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(), script.as_posix(),
+                                                  '--config', config.as_posix(), '--jason-hook'))
+    return (python + ' "$CLAUDE_PROJECT_DIR/' + relative + '" --config "$CLAUDE_PROJECT_DIR/'
+            + config.relative_to(root).as_posix() + '" --jason-hook')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', type=Path, default=Path(__file__).resolve().parents[1])
@@ -51,9 +67,7 @@ def main(argv=None):
         if args.agent in ('both', 'claude'):
             target = memory_runtime.storelib.safe(root / '.claude/settings.json', root)
             original = target.read_bytes() if target.exists() else b''
-            command = ' '.join(shlex.quote(p) for p in (Path(sys.executable).as_posix(),
-                             (Path(__file__).parent / 'claude_memory_hook.py').as_posix(),
-                             '--config', config.as_posix(), '--jason-hook'))
+            command = hook_command(root, config)
             updated = hook_settings.merged(original, None if args.uninstall else command)
             if not args.dry_run and updated != original:
                 write_with_backup(target, original, updated)

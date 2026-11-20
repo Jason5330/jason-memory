@@ -194,7 +194,13 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 
 `index` 預設最多回傳 6000 bytes，截斷時輸出 `rows_not_shown` 與取得完整清單的方式；`index --full` 列出全部索引列（#82）。新對話快照內嵌常駐筆記時 `user` 優先於 `feedback`，放不下的會依類型計數揭露（#83）。索引列與筆記的實際描述不一致（筆記在 runtime 之外被改過）時，`context` 的 `structural_errors` 與快照的 `STORE CHECK` 會點名，下次保存時從筆記重寫索引（#86）。
 
-記憶庫能自行修復的狀態會在下次開啟時處理並在 stderr 說明：`MEMORY.md` 遺失時從現有筆記重建（#78）；單則筆記超過 4 MiB 讀取上限時原封不動移到 `archive/quarantine/`，其他記憶照常運作（#77）。交易紀錄檔無法重播時，錯誤訊息會寫出檔案路徑與處理方式，`jason_doctor` 也會回報（#79）。
+記憶庫能自行修復的狀態會在下次開啟時處理並在 stderr 說明：`MEMORY.md` 遺失時從現有筆記重建（#78）；單則筆記超過 4 MiB 讀取上限時原封不動移到 `archive/quarantine/`，其他記憶照常運作（#77）。交易紀錄檔無法重播時，錯誤訊息會寫出檔案路徑與處理方式，`jason_doctor` 也會回報（#79）。`MEMORY.md` 超過 1 MiB 讀取上限時同樣原封不動移到 `archive/quarantine/`，再從筆記重建索引；新筆記的索引摘要最多 160 字，完整內容在筆記正文（#93）。`jason_doctor` 也會回報索引列與筆記描述不一致（runtime 寫的索引才檢查，#86）。
+
+Claude hook 遇到任何錯誤（記憶庫損壞、設定檔不見、專案搬移後設定不符）都不擋下使用者的提示：以 exit 0 回傳 `systemMessage`，並在新對話／提示的上下文加一行 `MEMORY UNAVAILABLE`，寫出失敗原因與 hook 命令；只有寫入記憶資料夾的工具呼叫仍會被拒絕（#87）。安裝器寫入的 hook 命令以 `$CLAUDE_PROJECT_DIR` 指向專案內的腳本與設定，搬移或改名專案資料夾不需重裝；Python 直譯器仍是絕對路徑，升級後找不到直譯器時 Claude Code 只顯示錯誤、不擋提示，重新執行 `INSTALL.cmd` 即可。
+
+`--scope` 在所有子指令意義相同：`index`、`export` 指定不存在的 scope 時回 `Unavailable scope`；不指定時涵蓋全部 store，`export` 的結果列出 `scopes`（#88）。只有 `local:…`，或 16 位 store 加 12 位雜湊的完整引用格式，或寫在「來源／Source／ledger」標示旁的文字，才會被當成帳本引用驗證；一般句子或網址裡的 git SHA 前綴照原文保存（#89）。
+
+新對話快照內嵌常駐筆記時只放正文與 Why（不含 frontmatter、jason-facts 與重複的 How to apply），每則最多 1,200 字，已內嵌的筆記不在索引重列；索引至少保留 1,000 字作導覽，放不下的常駐筆記在索引中排最前，並由 `PARTIAL SNAPSHOT` 寫明未送達與被縮短的數量（#91）。
 
 - **前台**：Claude 由 hooks 自動追加使用者提示、Shell 工具呼叫與結果、助理最終回覆；Codex 由
   `notify` 程式（`tools/codex_notify.py`）在每輪結束追加。專案的 `INSTALL.cmd` 會一次完成兩邊：合併 Claude

@@ -17,6 +17,8 @@ from hook_settings import EVENTS, TOOL_EVENTS
 
 LIMIT = 8000  # Characters; stay below Claude's large additionalContext file-fallback threshold.
 INDEX_SHARE = 2500  # Characters of index rows per store.
+INDEX_FLOOR = 1000  # Index characters kept per store before always-apply notes are inlined (#91).
+NOTE_CAP = 1200  # Characters of one inlined note; longer ones are shortened and disclosed (#91).
 
 
 def additional(event, text):
@@ -77,55 +79,84 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
     if changed:
         head += 'SETTINGS (differ from defaults; tell the user if memory seems not to update): ' + '; '.join(changed) + '\n'
     parts = [head]
-    omitted, omitted_kinds = [], {}
-    ordered_notes = []
-    # Small index for navigation; full bodies only for always-apply user/feedback notes.
+    sections, all_rows, always = [], {}, []
     for scope, info in sorted(snapshot.items(), key=lambda item: item[0] != 'project'):
-        parts.append(scope + ' root=' + info['root'] + ' revision=' + info['revision'] + '\n')
+        lines = [scope + ' root=' + info['root'] + ' revision=' + info['revision'] + '\n']
         issues = {key: info['audit'].get(key) for key in ('conflicts', 'invalid_facts')}
         if any(issues.values()):
             issue = json.dumps(issues, ensure_ascii=False)
-            parts.append('CONFLICT: do not choose an unsupported value. Audit/correct before asserting it. '
+            lines.append('CONFLICT: do not choose an unsupported value. Audit/correct before asserting it. '
                          + issue[:1000] + '\n')
         structure = info['audit'].get('structural_errors')
         if structure:
             # Index/file problems are not value conflicts (#78): the notes may still be correct.
-            parts.append('STORE CHECK (structure, not a value conflict; notes may be unlisted in the index): '
+            lines.append('STORE CHECK (structure, not a value conflict; notes may be unlisted in the index): '
                          + structure[:600] + '\n')
         duplicates = info['audit'].get('duplicates') or []
         if duplicates:
-            parts.append('DUPLICATE FACTS (same value in several notes; a correction must update all of them in one '
+            lines.append('DUPLICATE FACTS (same value in several notes; a correction must update all of them in one '
                          'plan): ' + '; '.join(d['subject'] + '/' + d['predicate'] + ' in ' + ', '.join(d['paths'])
                                                for d in duplicates)[:600] + '\n')
-        rows = [line for line in info.get('index', '').splitlines() if line.startswith('- [')]
-        if rows:
-            shown, size = [], 0
-            for row in rows:
-                if size + len(row) + 1 > INDEX_SHARE:
-                    break
-                shown.append(row)
-                size += len(row) + 1
-            text = 'INDEX ' + scope + ' (read a listed note only when relevant):\n' + '\n'.join(shown) + '\n'
-            if len(shown) < len(rows):
-                # Never drop index rows silently (#72): the AI must know the rest exists.
-                text += ('INDEX TRUNCATED: ' + str(len(rows) - len(shown)) + ' of ' + str(len(rows)) + ' ' + scope
-                         + ' index rows not shown; for the full list run: Command prefix + index --full '
-                         '(before concluding a note does not exist).\n')
-            parts.append(text)
+        sections.append((scope, lines))
+        all_rows[scope] = [line for line in info.get('index', '').splitlines() if line.startswith('- [')]
         # Who the user is and what they asked for first; within a type, path order (#83).
-        always = sorted(((name, body) for name, body in info['notes'].items()
-                         if re.search(r'^type: (user|feedback)\s*$', body, re.M)),
-                        key=lambda item: (not re.search(r'^type: user\s*$', item[1], re.M), item[0]))
-        ordered_notes.extend((scope, name, str(Path(info['root']) / name), body) for name, body in always)
-    for scope, name, path, body in ordered_notes:
-        item = '\nNOTE ' + path + '\n' + body + '\nEND NOTE\n'
-        if sum(map(len, parts)) + len(item) <= limit - 1200:
-            parts.append(item)
+        notes = sorted(((name, body) for name, body in info['notes'].items()
+                        if re.search(r'^type: (user|feedback)\s*$', body, re.M)),
+                       key=lambda item: (not re.search(r'^type: user\s*$', item[1], re.M), item[0]))
+        always.extend((scope, name, str(Path(info['root']) / name), body) for name, body in notes)
+    budget = limit - 1200
+    used = len(head) + sum(len(line) for _, lines in sections for line in lines)
+    always_names = {(scope, name) for scope, name, _, _ in always}
+    # The index keeps a guaranteed share for navigation; always-apply notes come next, because a rule
+    # that is only listed is often not applied (#91); the index then takes what is left.
+    reserve = 0
+    for scope, rows in all_rows.items():
+        other = sum(len(row) + 1 for row in rows if (scope, row_target(row)) not in always_names)
+        reserve += min(other, INDEX_FLOOR)
+    inlined, omitted, omitted_kinds, shortened = [], [], {}, []
+    for scope, name, path, body in always:
+        kind = 'user' if re.search(r'^type: user\s*$', body, re.M) else 'feedback'
+        text, cut = compact(body)
+        if cut:
+            text += ' [shortened; full note: read --scope ' + scope + ' --note ' + name + ']'
+        # The relative name is what read/apply take; inlined notes are not repeated in the index.
+        item = '\nNOTE ' + path + ' (' + kind + '; --scope ' + scope + ' --note ' + name + ')\n' + text + '\nEND NOTE\n'
+        if used + reserve + len(item) <= budget:
+            inlined.append((scope, name, item))
+            used += len(item)
+            if cut:
+                shortened.append('--scope ' + scope + ' --note ' + name)
         else:
             omitted.append('--scope ' + scope + ' --note ' + name)
-            kind = 'user' if re.search(r'^type: user\s*$', body, re.M) else 'feedback'
             omitted_kinds[kind] = omitted_kinds.get(kind, 0) + 1
-    if omitted:
+    inlined_names = {(scope, name) for scope, name, _ in inlined}
+    room = budget - used
+    for scope, lines in sections:
+        parts.extend(lines)
+        rows = all_rows[scope]
+        if not rows:
+            continue
+        # Not-inlined always-apply notes first: their row is the only trace of them in this snapshot.
+        listed = [row for row in rows if (scope, row_target(row)) not in inlined_names]
+        listed.sort(key=lambda row: (scope, row_target(row)) not in always_names)
+        share = min(INDEX_SHARE, max(room, 0))
+        shown, size = [], 0
+        for row in listed:
+            if size + len(row) + 1 > share:
+                break
+            shown.append(row)
+            size += len(row) + 1
+        room -= size
+        text = ('INDEX ' + scope + ' (read a listed note only when relevant; notes inlined below are not repeated):\n'
+                + '\n'.join(shown) + '\n')
+        if len(shown) < len(listed):
+            # Never drop index rows silently (#72): the AI must know the rest exists.
+            text += ('INDEX TRUNCATED: ' + str(len(listed) - len(shown)) + ' of ' + str(len(listed)) + ' ' + scope
+                     + ' index rows not shown; for the full list run: Command prefix + index --full '
+                     '(before concluding a note does not exist).\n')
+        parts.append(text)
+    parts.extend(item for _, _, item in inlined)
+    if omitted or shortened:
         listed, size = [], 0
         for item in omitted:
             if size + len(item) + 2 > 700:
@@ -135,12 +166,43 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
         more = len(omitted) - len(listed)
         parts.append('\nPARTIAL SNAPSHOT: ' + str(len(omitted)) + ' always-apply note bodies omitted ('
                      + ', '.join(k + ' ' + str(v) for k, v in sorted(omitted_kinds.items(), reverse=True))
-                     + '). Do NOT dump the '
+                     + ')' + (', ' + str(len(shortened)) + ' shortened' if shortened else '')
+                     + '. These rules were NOT delivered in full this turn. Do NOT dump the '
                      'whole store with context. Only if one may apply to THIS task, read just that note with: '
                      'the Command prefix above + read --scope SCOPE --note RELATIVE_NOTE. Omitted: ' + '; '.join(listed)
                      + ((' (+' + str(more) + ' more; Command prefix + index --full)') if more else '') + '\n')
     text = ''.join(parts)[:limit]
     return text
+
+
+def row_target(row):
+    found = re.search(r'\]\(([^)]+)\)', row)
+    return found.group(1) if found else row
+
+
+FENCE = re.compile(r'^```jason-facts\n.*?^```\n?', re.M | re.S)
+
+
+def compact(body):
+    """A note as the agent needs it in the snapshot (#91): no frontmatter, no machine fact block, and no
+    `How to apply:` line that only repeats the rule above it. Returns (text, shortened)."""
+    rest = body.replace('\r\n', '\n')
+    if rest.startswith('---\n'):
+        _, found, after = rest[4:].partition('\n---\n')
+        rest = after if found else rest
+    rest = FENCE.sub('', rest)
+    kept, seen = [], set()
+    for paragraph in re.split(r'\n\s*\n', rest.strip()):
+        paragraph = paragraph.strip()
+        repeated = re.sub(r'^How to apply:\s*(?:本專案|全局共用)；', '', paragraph)
+        if not paragraph or (repeated != paragraph and repeated.strip() in seen):
+            continue
+        seen.add(paragraph)
+        kept.append(paragraph)
+    text = '\n'.join(kept)
+    if len(text) <= NOTE_CAP:
+        return text, False
+    return text[:NOTE_CAP].rstrip() + '…', True
 
 
 BACKGROUND_HEAD = (
@@ -504,6 +566,7 @@ def handle(event, config):
 
 
 LEDGER_WARNINGS = []
+LEDGER_REASONS = []
 
 
 def record(root, kind, data, session):
@@ -513,6 +576,7 @@ def record(root, kind, data, session):
         return True
     except (OSError, ValueError) as exc:
         LEDGER_WARNINGS.append('Jason-memory：原始帳本無法寫入，本次事件未記錄（' + str(exc) + '）')
+        LEDGER_REASONS.append(str(exc))
         return False
 
 
@@ -521,6 +585,7 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--jason-hook', action='store_true')
     args = parser.parse_args()
+    event = {}
     try:
         raw = sys.stdin.buffer.read(runtime.MAX_BYTES + 1)
         if len(raw) > runtime.MAX_BYTES:
@@ -530,13 +595,59 @@ def main():
         if LEDGER_WARNINGS:
             result = dict(result or {})
             result['systemMessage'] = '\n'.join(filter(None, [result.get('systemMessage')] + LEDGER_WARNINGS))
+            # systemMessage reaches only the user; the agent must know too (#92).
+            result = with_context(result, event.get('hook_event_name'),
+                                  'LEDGER WARNING: the raw conversation ledger could not be written ('
+                                  + '; '.join(LEDGER_REASONS) + '). This turn is NOT recorded and background '
+                                  'consolidation cannot run until it is repaired (run memory_ledger.py --config '
+                                  + str(args.config.absolute()) + ' verify). Tell the user; never say anything '
+                                  'was or will be remembered.')
         if result:
             print(json.dumps(result, ensure_ascii=True))
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        # Errors must be visible, not a false successful recall. SessionStart cannot block.
-        print('Jason-memory hook failed: ' + str(exc), file=sys.stderr)
-        return 2
+        return failed(event, args.config, exc)
+
+
+CONTEXT_EVENTS = ('SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure')
+
+
+def with_context(result, name, text):
+    """Add a line the agent reads (additionalContext) where the host supports it."""
+    if name not in CONTEXT_EVENTS:
+        return result
+    result = dict(result)
+    specific = dict(result.get('hookSpecificOutput') or {'hookEventName': name})
+    specific['additionalContext'] = '\n'.join(filter(None, [specific.get('additionalContext'), text]))
+    result['hookSpecificOutput'] = specific
+    return result
+
+
+def failed(event, config, exc):
+    """Memory is an add-on: a broken store, a moved project or a stale hook must not block the user's
+    prompt or stop the session (#87, #93). Say what failed, where, and how to fix it, then continue
+    without memory. Only the direct-write guard stays strict for memory paths."""
+    name = event.get('hook_event_name') if isinstance(event, dict) else None
+    command = ' '.join(shlex.quote(p) for p in (sys.executable, str(Path(__file__).resolve()), '--config', str(config)))
+    reason = ('Jason-memory hook failed: ' + str(exc) + ' (hook: ' + command + '). Memory is unavailable for this '
+              'event; the conversation continues. Diagnose with: ' + shlex.quote(sys.executable) + ' '
+              + shlex.quote(str(Path(__file__).resolve().with_name('jason_doctor.py'))) + ' MEMORY_ROOT; '
+              'reinstall hooks with tools/install_hooks.py if the project moved.')
+    print(reason, file=sys.stderr)
+    if name == 'PreToolUse':
+        data = (event.get('tool_input') or {}) if isinstance(event, dict) else {}
+        path = data.get('file_path') or data.get('path') if isinstance(data, dict) else None
+        if (path and event.get('tool_name') in ('Write', 'Edit', 'MultiEdit', 'NotebookEdit')
+                and parallel_memory(path)):
+            print(json.dumps(deny(reason + ' Writes to memory folders are refused while the guard cannot run.'),
+                             ensure_ascii=True))
+        return 0
+    result = {'systemMessage': reason}
+    if name in ('SessionStart', 'UserPromptSubmit'):
+        result = with_context(result, name, 'MEMORY UNAVAILABLE this turn: ' + reason
+                              + ' Tell the user once; never claim anything was remembered.')
+    print(json.dumps(result, ensure_ascii=True))
+    return 0
 
 
 if __name__ == '__main__':

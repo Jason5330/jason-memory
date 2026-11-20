@@ -304,6 +304,8 @@ def opened(config, project=None):
             root.mkdir(parents=True, exist_ok=True)
             index = storelib.safe(root / 'MEMORY.md', lock_root)
             missing = not index.exists()
+            if not missing and quarantine_index(root):
+                missing = True  # Rebuilt from the notes below (#93).
             if missing:
                 storelib.atomic_write(index, (BASE / 'templates/MEMORY.md').read_text(encoding='utf-8-sig'))
             storelib.recover(root)
@@ -336,6 +338,23 @@ def quarantine_oversized(root):
         links = sorted(p.relative_to(manifest.parent).as_posix() for p in manifest.parent.rglob('*.md') if p != manifest)
         storelib.atomic_write(manifest, '# 歷史資料，不作現行要求\n\n' + ''.join('- [' + p + '](' + p + ')\n' for p in links))
     return moved
+
+
+def quarantine_index(root):
+    """An index over the reading cap fails every command and the hook (#93). The index is derived from the
+    notes, so move it byte for byte to archive/quarantine/ and let repair() rebuild it."""
+    index = root / 'MEMORY.md'
+    if index.is_symlink() or index.stat().st_size <= storelib.doctor.INDEX_READ_CAP:
+        return False
+    target = storelib.safe(root / 'archive/quarantine' / uuid.uuid4().hex / 'MEMORY.md', root)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(index, target)
+    if target.stat().st_size != index.stat().st_size:
+        raise ValueError('Could not quarantine oversized index: ' + str(index))
+    index.unlink()
+    print('Jason-memory: MEMORY.md was over the ' + str(storelib.doctor.INDEX_READ_CAP // (1024 * 1024)) + ' MiB '
+          'reading limit; moved it to ' + str(target) + ' and rebuilt the index from the notes', file=sys.stderr)
+    return True
 
 
 def repair(root, index_missing=False):
@@ -387,7 +406,7 @@ def context(roots):
         report['structural_errors'] = output.getvalue().strip() if code or size else ''
         index = read_index(root)
         drift = index_drift(data, index, (root / 'archive/MEMORY.md').exists())
-        if drift:
+        if drift and 'out of sync with notes' not in report['structural_errors']:
             report['structural_errors'] = (report['structural_errors'] + '\n' + drift).strip()
         result[scope] = {'root': str(root), 'revision': revision_for(data, index),
                          'index': index,
@@ -429,7 +448,10 @@ def check_receipt(root, receipt_id, since=0):
     """Validate stored evidence against current disk contents; never trust a claimed filename alone."""
     if not isinstance(receipt_id, str) or len(receipt_id) != 32 or any(c not in '0123456789abcdef' for c in receipt_id):
         raise ValueError('Invalid receipt id')
-    receipt = read_json(storelib.safe(root / '.receipts' / (receipt_id + '.json'), root))
+    try:
+        receipt = read_json(storelib.safe(root / '.receipts' / (receipt_id + '.json'), root))
+    except FileNotFoundError:
+        receipt = None  # Expired, from another turn or cleaned up: no evidence, not a disk fault (#92).
     if (not isinstance(receipt, dict) or receipt.get('version') != 1 or receipt.get('id') != receipt_id
             or receipt.get('root') != str(root) or not isinstance(receipt.get('created_ns'), int)
             or receipt['created_ns'] < since or receipt.get('operation') not in ('apply', 'verify')
@@ -588,7 +610,10 @@ def remember(root, subject, key, value, why, scope='project', kind=None, roots=N
         fm, _, _ = storelib.doctor._frontmatter(data[old_name])
         created = min(created, str((fm or {}).get('created') or today))
     # JSON strings are valid quoted YAML scalar values; no hand-written metadata required.
-    description = json.dumps(value, ensure_ascii=False)
+    # The index row is a pointer; the full value stays in the note body, so a long value cannot grow the
+    # index without bound (#93).
+    description = json.dumps(value if len(value) <= DESCRIPTION_CAP else value[:DESCRIPTION_CAP - 1] + '…',
+                             ensure_ascii=False)
     content = ('---\nname: ' + slug + '\ndescription: ' + description + '\ntype: ' + kind + '\n'
                'created: ' + created + '\nupdated: ' + today + '\n---\n\n' + value + '\n\nWhy: ' + why +
                '\n\nHow to apply: ' + ('全局共用' if scope == 'global' else '本專案') + '；' + value +
@@ -601,6 +626,7 @@ def remember(root, subject, key, value, why, scope='project', kind=None, roots=N
     return result
 
 
+DESCRIPTION_CAP = 160
 # Anything shaped like a reference, including too-long or too-short parts (#35); the ledger's
 # `source` parser then decides, so remember/apply and `source --ref` agree on what is valid.
 REF_LIKE = re.compile(r'(?<![0-9A-Za-z_])(?:local|[0-9a-f]{8,32}):\d+:[0-9a-f]{6,}(?![0-9A-Za-z_])')
@@ -616,10 +642,29 @@ EXPLICIT_REF = re.compile(r'(?i)\bledger\s+[`*_<\["\'「【《]*(' + _REF_PART +
 LOOSE_REF = re.compile(r'(?<![0-9A-Za-z_])(?:local|[0-9a-f]{8,32}):\d+:[0-9A-Za-z]+(?![0-9A-Za-z_])', re.I)
 
 
+# A line that presents a source: there every reference-shaped text is checked, malformed or not.
+SOURCE_LABEL = re.compile(r'(?i)來源|出處|出处|\bsources?\b|\bledger\b|\bref\b')
+URL = re.compile(r'(?i)\b[a-z][a-z0-9+.\-]*://\S+')
+
+
+def _cited(ref):
+    """Outside a source label, only text with the exact shape the ledger writes is a reference (#89):
+    `local:...`, or a 16-hex store with a 12-hex record hash. A git SHA prefix such as
+    `abc1234:42:def5678` in an ordinary sentence is content, not a citation."""
+    store, _, digest = ref.split(':')
+    return (store.lower() == 'local'
+            or (len(store) == 16 and len(digest) == 12 and re.fullmatch(r'[0-9a-f]+', store + digest) is not None))
+
+
 def note_source_refs(content):
     # Keep inline code citations; skip literal blocks and comments using the note parser (#42).
     active = storelib.doctor._active_markdown(content, keep_inline=True)
-    refs = set(REF_LIKE.findall(active)) | set(LOOSE_REF.findall(active))
+    refs = set()
+    for line in active.splitlines():
+        labelled = SOURCE_LABEL.search(line) is not None
+        loose = URL.sub(' ', line) if not labelled else line  # A URL path is never a citation (#89).
+        found = set(REF_LIKE.findall(loose)) | set(LOOSE_REF.findall(loose))
+        refs |= found if labelled else {ref for ref in found if _cited(ref)}
     refs |= {ref.rstrip('.') for ref in EXPLICIT_REF.findall(active)}
     return refs
 
@@ -641,8 +686,9 @@ def check_sources(refs, roots):
         try:
             memory_ledger.source(roots, ref)
         except (OSError, ValueError) as error:
-            raise ValueError('Source reference does not resolve; the note keeps its current source: '
-                             + ref + ' (' + str(error) + ')')
+            raise ValueError('Source reference does not resolve: ' + ref + ' (' + str(error) + '). Nothing was '
+                             'saved; an existing note keeps its current source. If this text is not a ledger citation, '
+                             'write it without the STORE:SEQ:HASH shape or away from a 來源/Source/ledger label (#89)')
 
 
 def upgrade_sources(root, data, names, why, scope, roots=None):
@@ -769,7 +815,8 @@ def main():
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--project', type=Path)
     parser.add_argument('command', choices=['context', 'audit', 'apply', 'verify', 'remember', 'index', 'read', 'export'])
-    parser.add_argument('--scope', choices=['project', 'global'], default='project')
+    parser.add_argument('--scope', choices=['project', 'global'], default=None,
+                        help='default project; index/export without --scope cover every store')
     parser.add_argument('--plan', type=Path)
     parser.add_argument('--note', action='append', default=[])
     parser.add_argument('--subject')
@@ -782,8 +829,15 @@ def main():
     parser.add_argument('--full', action='store_true', help='index: every row, no navigation budget (#82)')
     parser.add_argument('--output', type=Path, help='export: new UTF-8 Markdown file to create')
     args = parser.parse_args()
+    explicit_scope = args.scope is not None
+    args.scope = args.scope or 'project'
     try:
         with opened(args.config, args.project) as (cfg, project, roots):
+            if args.command in ('index', 'export') and explicit_scope:
+                # Same meaning as read/verify (#88): never answer for another store.
+                if args.scope not in roots:
+                    raise ValueError('Unavailable scope')
+                roots = {args.scope: roots[args.scope]}
             if args.command in ('apply', 'remember') and not foreground_writes_allowed(cfg, roots):
                 raise ValueError(BACKGROUND_ERROR)
             if args.command == 'apply':
@@ -813,7 +867,7 @@ def main():
             elif args.command == 'export':
                 if args.output is None:
                     raise ValueError('export requires --output FILE.md')
-                result = export(roots, args.output)
+                result = dict(export(roots, args.output), scopes=sorted(roots))
             elif args.command == 'read':
                 if args.scope not in roots:
                     raise ValueError('Unavailable scope')

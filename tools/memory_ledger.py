@@ -346,9 +346,21 @@ def settings_notes(opts):
     default = DEFAULT_SETTINGS['dream_every'] if 'dream_every' in DEFAULT_SETTINGS else 20
     if not opts.get('enabled'):
         return notes  # Foreground mode without a ledger is a supported setup, not a silent change.
-    if opts.get('dream_every', default) > 10 * default:
-        notes.append('ledger.dream_every=' + str(opts['dream_every']) + ' (default ' + str(default) + '): '
+    # Any change from a default that alters behaviour is disclosed, not only extreme ones (#85 follow-up).
+    every = opts.get('dream_every', default)
+    if every > 10 * default:
+        notes.append('ledger.dream_every=' + str(every) + ' (default ' + str(default) + '): '
                      'background consolidation will rarely or never run; use dream-run to consolidate now')
+    elif every != default:
+        notes.append('ledger.dream_every=' + str(every) + ' (default ' + str(default) + '): background consolidation '
+                     'starts after every ' + str(every) + ' new records')
+    if opts.get('foreground_writes') is not False:
+        # Background mode announces itself in the snapshot head; the ledger with foreground writes does not.
+        notes.append('ledger.foreground_writes=true: conversations save memory directly (foreground mode) while the '
+                     'ledger also records them; background memory mode is foreground_writes=false')
+    if opts.get('dream_timeout', DEFAULT_SETTINGS['dream_timeout']) != DEFAULT_SETTINGS['dream_timeout']:
+        notes.append('ledger.dream_timeout=' + str(opts['dream_timeout']) + ' s (default '
+                     + str(DEFAULT_SETTINGS['dream_timeout']) + ')')
     if isinstance(opts.get('dream_agent'), list):
         notes.append('ledger.dream_agent is a custom command: ' + ' '.join(map(str, opts['dream_agent']))[:200])
     return notes

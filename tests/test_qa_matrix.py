@@ -660,7 +660,10 @@ else:
                     with self.subTest(damage=label, entry=entry):
                         shown = result.stdout + result.stderr
                         if entry == 'claude hook':
-                            self.assertEqual(result.returncode, 2, shown)  # Reported, with the file to fix.
+                            # Reported with the file to fix, without blocking the user's prompt (#87).
+                            self.assertEqual(result.returncode, 0, shown)
+                            self.assertIn('systemMessage', result.stdout)
+                            self.assertIn('MEMORY UNAVAILABLE', result.stdout)
                         else:
                             self.assertNotEqual(result.returncode, 0, shown)
                         self.assertIn(journal.name, shown)

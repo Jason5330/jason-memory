@@ -246,6 +246,13 @@ def _kill_tree(process):
         pass
 
 
+def _close(stream):
+    try:
+        stream.close()
+    except (OSError, ValueError):
+        pass
+
+
 def _run_agent(command, text, env, project, timeout=1800):
     """Run the agent; success needs exit 0 AND its explicit ok status line (else retry later).
     The prompt is written from a thread: subprocess.run writes stdin synchronously on Windows, so an
@@ -257,12 +264,16 @@ def _run_agent(command, text, env, project, timeout=1800):
     def feed():
         try:
             process.stdin.write(text.encode('utf-8'))
-            process.stdin.close()
         except OSError:
             pass
+        finally:
+            _close(process.stdin)
 
     def read():
-        chunks.append(process.stdout.read())
+        try:
+            chunks.append(process.stdout.read())
+        except (OSError, ValueError):
+            pass
     threads = [threading.Thread(target=feed, daemon=True), threading.Thread(target=read, daemon=True)]
     for thread in threads:
         thread.start()
@@ -272,7 +283,12 @@ def _run_agent(command, text, env, project, timeout=1800):
         _kill_tree(process)
         process.wait(timeout=30)
         raise
-    threads[1].join(timeout=30)
+    finally:
+        # Every run, normal or timed out, releases both pipe handles (#94).
+        for thread in threads:
+            thread.join(timeout=30)
+        _close(process.stdin)
+        _close(process.stdout)
     output = b''.join(chunks).decode('utf-8', 'replace')
     sys.stdout.write(output)
     sys.stdout.flush()

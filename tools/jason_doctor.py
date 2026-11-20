@@ -471,7 +471,9 @@ def main(argv):
     iraw = _read_bytes(idx_path, cap=INDEX_READ_CAP)
     if iraw is _TOO_LARGE:
         print("ISSUE: index exceeds the doctor parser safety limit (1 MiB); "
-              "consistency was not checked. Split or compact it before retrying. "
+              "consistency was not checked. In a Jason-memory store, run any memory_runtime.py "
+              "command (for example index): it moves the oversized MEMORY.md byte for byte to "
+              "archive/quarantine/ and rebuilds the index from the notes. "
               "This is a diagnostic limit, not a host load limit.")
         return 1
     if iraw is None:
@@ -604,6 +606,29 @@ def main(argv):
             ptr_counts[base] = ptr_counts.get(base, 0) + 1
         else:
             issues.append(f"index points to a missing file: {tgt}")
+
+    # A runtime-written index mirrors each note's frontmatter description. A row that no longer
+    # matches means the note was edited outside the runtime (#86); hand-written indexes are not
+    # held to this, so the check runs only on the runtime's own index header.
+    if itext.lstrip().startswith("# 記憶索引 (Jason-memory)"):
+        drifted = []
+        for row in itext.splitlines():
+            m = re.match(r"^- \[([^\]]*)\]\(([^)\s]+)\) — (.*)$", row)
+            if not m or _is_remote_url(m.group(2)) or "://" in m.group(2):
+                continue
+            full = os.path.realpath(os.path.join(root, m.group(2).replace("\\", "/")))
+            if not _contained(full, root_abs) or not os.path.isfile(full) or _excluded_dir(full, root_abs):
+                continue
+            text = _read(full)
+            if not isinstance(text, str):
+                continue
+            fm, _, _ = _frontmatter(text)
+            if fm and (fm.get("description", "") != m.group(3) or fm.get("name", "") != m.group(1)):
+                drifted.append(m.group(2))
+        if drifted:
+            issues.append("index out of sync with notes (edited outside the runtime?): "
+                          + ", ".join(drifted[:20]) + (f" (+{len(drifted) - 20} more)" if len(drifted) > 20 else "")
+                          + " — the next memory save rewrites the index from the notes")
 
     # duplicate index pointers: the same note pointed to from more than one index line
     # is redundant (INFO — a thematic index may cross-reference on purpose, so it does
