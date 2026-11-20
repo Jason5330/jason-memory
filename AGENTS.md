@@ -18,7 +18,7 @@
 每輪第一則可見回覆前先召回，安靜執行，不說讀記憶。Claude hook 的快照可直接使用：
 常駐偏好已內嵌，其他筆記只列在索引，相關時才單篇讀取。
 缺少快照或其他宿主時，先讀小索引，再只讀與本輪任務相關的筆記：
-`python tools/memory_runtime.py --config .jason-memory.json index`
+`python tools/memory_runtime.py --config .jason-memory.json index`（標示截斷時加 `--full` 取得完整清單）
 `python tools/memory_runtime.py --config .jason-memory.json read --note 相對路徑.md`
 標示 PARTIAL 也照此辦理；不要用 `context` 輸出整庫。
 

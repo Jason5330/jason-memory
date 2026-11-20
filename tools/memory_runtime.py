@@ -75,10 +75,22 @@ def configuration(path, project=None):
     return cfg, root, home, {'global': home / 'memory/shared', 'project': home / 'memory/projects' / key}
 
 
-def foreground_writes_allowed(cfg):
-    """False in background mode unless this process is the background consolidation worker."""
+def foreground_writes_allowed(cfg, roots=None):
+    """False in background mode unless this process is the background consolidation worker: it carries
+    JASON_DREAM=1 AND the owner token of the job currently reserved for this store (#81). A leftover
+    JASON_DREAM=1 in some shell does not unlock writes."""
     ledger = cfg.get('ledger') or {}
-    return ledger.get('foreground_writes', True) is not False or os.environ.get('JASON_DREAM') == '1'
+    if ledger.get('foreground_writes', True) is not False:
+        return True
+    owner = os.environ.get('JASON_DREAM_OWNER')
+    if os.environ.get('JASON_DREAM') != '1' or not owner or not roots or 'project' not in roots:
+        return False
+    state = storelib.safe(Path(roots['project']) / '.raw/dream.json', Path(roots['project']))
+    try:
+        running = (read_json(state).get('running') or {}) if state.exists() else {}
+    except (OSError, ValueError, AttributeError):
+        return False
+    return running.get('owner') == owner
 
 
 def note_path(root, name):
@@ -346,6 +358,23 @@ def repair(root, index_missing=False):
               + str(len(data)) + ' note(s): ' + str(root / 'MEMORY.md'), file=sys.stderr)
 
 
+def index_drift(data, index, archived):
+    """Index rows that no longer match the notes they point to - a note edited outside the runtime
+    (#86). Reported, not repaired: the mismatch is the evidence, and the next save rewrites the index."""
+    try:
+        expected = {line for line in index_for(data, archived).splitlines() if line.startswith('- [')}
+    except ValueError:
+        return ''  # Invalid notes are reported by doctor/audit already.
+    actual = {line for line in index.splitlines() if line.startswith('- [')}
+    if expected == actual:
+        return ''
+    names = sorted({re.search(r'\]\(([^)]+)\)', line).group(1) for line in expected ^ actual
+                    if re.search(r'\]\(([^)]+)\)', line)})
+    return ('index out of sync with notes (edited outside the runtime?): ' + ', '.join(names[:20])
+            + (' (+' + str(len(names) - 20) + ' more)' if len(names) > 20 else '')
+            + '; the next save rewrites the index from the notes')
+
+
 def context(roots):
     result = {}
     for scope, root in roots.items():
@@ -357,6 +386,9 @@ def context(roots):
             size = storelib.check.main(['check', str(root / 'MEMORY.md')])
         report['structural_errors'] = output.getvalue().strip() if code or size else ''
         index = read_index(root)
+        drift = index_drift(data, index, (root / 'archive/MEMORY.md').exists())
+        if drift:
+            report['structural_errors'] = (report['structural_errors'] + '\n' + drift).strip()
         result[scope] = {'root': str(root), 'revision': revision_for(data, index),
                          'index': index,
                          'notes': data, 'audit': report}
@@ -653,10 +685,16 @@ def bounded_index(roots, budget=INDEX_BUDGET):
         text = read_index(root)
         raw = text.encode('utf-8')
         truncated = len(raw) > budget
+        rows = sum(1 for line in text.splitlines() if line.startswith('- ['))
         if truncated:
             text = raw[:budget].decode('utf-8', 'ignore').rsplit('\n', 1)[0] + '\n'
-        result[scope] = {'root': str(root), 'revision': revision(root), 'index': text,
-                         'truncated': truncated, 'bytes': len(text.encode('utf-8'))}
+        entry = {'root': str(root), 'revision': revision(root), 'index': text,
+                 'truncated': truncated, 'bytes': len(text.encode('utf-8'))}
+        if truncated:
+            # Say what is missing and how to get it, not only that something is (#82).
+            entry['rows_not_shown'] = rows - sum(1 for line in text.splitlines() if line.startswith('- ['))
+            entry['full_list'] = 'rerun index with --full'
+        result[scope] = entry
     return result
 
 
@@ -741,11 +779,12 @@ def main():
     parser.add_argument('--type', dest='kind', choices=NOTE_TYPES, default=None,
                         help='user=identity/role, feedback=preference/rule, project=project constraint, reference=pointer')
     parser.add_argument('--max-bytes', type=int, default=None)
+    parser.add_argument('--full', action='store_true', help='index: every row, no navigation budget (#82)')
     parser.add_argument('--output', type=Path, help='export: new UTF-8 Markdown file to create')
     args = parser.parse_args()
     try:
         with opened(args.config, args.project) as (cfg, project, roots):
-            if args.command in ('apply', 'remember') and not foreground_writes_allowed(cfg):
+            if args.command in ('apply', 'remember') and not foreground_writes_allowed(cfg, roots):
                 raise ValueError(BACKGROUND_ERROR)
             if args.command == 'apply':
                 if args.scope not in roots or args.plan is None:
@@ -769,7 +808,8 @@ def main():
                     raise ValueError('Unavailable scope')
                 result = verify(roots[args.scope], args.note)
             elif args.command == 'index':
-                result = {'project': str(project), 'stores': bounded_index(roots, args.max_bytes or INDEX_BUDGET)}
+                budget = storelib.doctor.INDEX_READ_CAP if args.full else (args.max_bytes or INDEX_BUDGET)
+                result = {'project': str(project), 'stores': bounded_index(roots, budget)}
             elif args.command == 'export':
                 if args.output is None:
                     raise ValueError('export requires --output FILE.md')

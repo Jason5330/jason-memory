@@ -88,16 +88,18 @@ def render_record(record, store='local'):
 
 
 def chunks(records, store='local'):
-    current, size = [], 0
+    """Prompt-sized groups of rendered records, each with the last ledger seq it covers."""
+    current, size, last = [], 0, 0
     for record in records:
         line = render_record(record, store)
         if current and size + len(line) > CHUNK_CAP:
-            yield current
+            yield current, last
             current, size = [], 0
         current.append(line)
         size += len(line) + 1
+        last = record['seq']
     if current:
-        yield current
+        yield current, last
 
 
 GLOBAL_SCOPE_HINT = ('\n全局版範圍：使用者對 AI 的一般偏好與身份（回報格式、語言、時間格式、稱呼等，'
@@ -206,7 +208,8 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
     env = dict(os.environ, JASON_DREAM='1')
     timeout = opts.get('dream_timeout', 1800)
     run = runner or (lambda cmd, text: _run_agent(cmd, text, env, project, timeout))
-    for lines in chunks(records, store):
+    owner = os.environ.get('JASON_DREAM_OWNER') if target == Path(config) else None
+    for lines, last in chunks(records, store):
         try:
             code = run(command, build_prompt(lines, index_text, prefix, tcfg.get('mode') == 'global'))
         except subprocess.TimeoutExpired:
@@ -218,6 +221,10 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
             return 127 if isinstance(exc, OSError) else 124
         if code:
             return code
+        if owner:
+            # Keep finished chunks: a later chunk timing out must not send this one back (#73).
+            with runtime.opened(config, project) as (_, _, roots):
+                ledger.advance_cursor(roots['project'], owner, last)
     return 0
 
 

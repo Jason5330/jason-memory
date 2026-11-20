@@ -470,7 +470,13 @@ class BackgroundModeTests(Base):
         self.assertEqual(refused.returncode, 1)
         self.assertIn('background memory mode', refused.stderr)
         self.assertEqual(runtime.notes(self.root), {})
-        allowed = self.cli(*args, env={'JASON_DREAM': '1'})
+        leftover = self.cli(*args, env={'JASON_DREAM': '1'})  # #81: a stray variable unlocks nothing.
+        self.assertEqual(leftover.returncode, 1)
+        self.assertIn('background memory mode', leftover.stderr)
+        self.assertEqual(runtime.notes(self.root), {})
+        from worker_identity import as_worker
+        with as_worker(self.config, env={}) as worker:
+            allowed = self.cli(*args, env=worker)
         self.assertEqual(allowed.returncode, 0, allowed.stderr)
         self.assertEqual(len(runtime.notes(self.root)), 1)
 

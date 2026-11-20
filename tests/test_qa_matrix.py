@@ -17,6 +17,8 @@ import tempfile
 import unittest
 from zipfile import ZipFile
 
+from worker_identity import as_worker
+
 ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / 'tools/build_global_download.py'
 
@@ -64,7 +66,11 @@ class GlobalQAMatrix(unittest.TestCase):
     def run_py(self, script, *args, stdin=None, dream=False, extra_env=None):
         env = dict(self.env, **(extra_env or {}))
         if dream:
-            env['JASON_DREAM'] = '1'
+            # A background write needs the owner token of a reserved job for that store (#81).
+            project = args[list(args).index('--project') + 1]
+            with as_worker(self.config, project, env):
+                return subprocess.run([sys.executable, str(script), *map(str, args)], input=stdin,
+                                      capture_output=True, text=True, encoding='utf-8', env=env, timeout=120)
         return subprocess.run([sys.executable, str(script), *map(str, args)], input=stdin, capture_output=True,
                               text=True, encoding='utf-8', env=env, timeout=120)
 
@@ -663,6 +669,58 @@ else:
                 journal.unlink()
             result = self.run_py(self.runtime, '--config', self.config, '--project', folder, 'index')
             self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    # --- invariant 7: every hint the snapshot gives works as written, on a store past every budget ----
+    def test_snapshot_hints_work_on_a_large_store_and_worker_identity_is_bound(self):
+        """#82 #83 #81 on the packaged ZIP: run the hinted command verbatim; a stray JASON_DREAM unlocks nothing."""
+        import re
+        import shlex
+        folder = self.project('large-store')
+        ref = self.append(folder, 'prompt', {'text': 'QA large store'})
+        for i in range(45):
+            kind = ('project', 'reference', 'feedback')[i % 3]
+            result = self.run_py(self.runtime, '--config', self.config, '--project', folder, 'remember', '--scope',
+                                 'project', '--type', kind, '--subject', 'qa', '--key', 'large-' + str(i),
+                                 '--value', 'QA large rule ' + str(i) + ' ' + '很長的摘要內容 ' * 12,
+                                 '--why', '來源：ledger ' + ref, dream=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        result = self.run_py(self.runtime, '--config', self.config, '--project', folder, 'remember', '--scope',
+                             'project', '--type', 'user', '--subject', 'qa', '--key', 'identity',
+                             '--value', 'QA_LARGE_USER_IDENTITY', '--why', '來源：ledger ' + ref, dream=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [l for l in (self.store(folder) / 'MEMORY.md').read_text(encoding='utf-8').splitlines()
+                if l.startswith('- [')]
+        event = {'hook_event_name': 'SessionStart', 'session_id': 'qa', 'cwd': str(folder), 'source': 'startup'}
+        snap = json.loads(self.run_py(self.hook, '--config', self.config, '--jason-hook',
+                                      stdin=json.dumps(event)).stdout)['hookSpecificOutput']['additionalContext']
+        with self.subTest(check='hint returns the full project index'):
+            self.assertIn('INDEX TRUNCATED', snap)
+            prefix = shlex.split(re.search(r'^Command prefix \(Bash\): (.+)$', snap, re.M).group(1))
+            hint = re.search(r'for the full list run: Command prefix \+ (index[^(]*?) \(', snap).group(1).split()
+            full = subprocess.run(prefix + hint, capture_output=True, text=True, encoding='utf-8', env=self.env)
+            self.assertEqual(full.returncode, 0, full.stderr)
+            store = json.loads(full.stdout)['stores']['project']
+            self.assertFalse(store['truncated'])
+            self.assertEqual(sum(1 for l in store['index'].splitlines() if l.startswith('- [')), len(rows))
+        with self.subTest(check='user identity is inlined first'):
+            self.assertIn('QA_LARGE_USER_IDENTITY', snap)
+        with self.subTest(check='bare JASON_DREAM=1 cannot write'):
+            stray = self.run_py(self.runtime, '--config', self.config, '--project', folder, 'remember', '--scope',
+                                'project', '--subject', 'qa', '--key', 'stray', '--value', 'QA_STRAY',
+                                '--why', '來源：ledger ' + ref, extra_env={'JASON_DREAM': '1'})
+            self.assertEqual(stray.returncode, 1, stray.stdout)
+            self.assertIn('background memory mode', stray.stderr)
+        with self.subTest(check='worker hook still blocks direct edits'):
+            target = self.store(folder) / 'feedback/qa-direct.md'
+            pre = {'hook_event_name': 'PreToolUse', 'tool_name': 'Write', 'session_id': 'w', 'cwd': str(folder),
+                   'tool_input': {'file_path': str(target)}}
+            out = self.run_py(self.hook, '--config', self.config, '--jason-hook', stdin=json.dumps(pre),
+                              extra_env={'JASON_DREAM': '1'})
+            self.assertEqual(json.loads(out.stdout)['hookSpecificOutput']['permissionDecision'], 'deny')
+        with self.subTest(check='pending discloses consolidation switched off by settings'):
+            pending = json.loads(self.run_py(self.ledger, '--config', self.config, '--project', folder, 'pending').stdout)
+            self.assertTrue(any('dream_every=100000' in note for note in pending['settings']))
 
 
 if __name__ == '__main__':

@@ -70,8 +70,14 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
                 'Read one note: read --scope SCOPE --note RELATIVE_NOTE. Exact quote, number or error from earlier '
                 'conversations: run ' + Path(ledger.__file__).resolve().as_posix() + ' --config CONFIG search --text "..." '
                 '(raw ledger is the source of truth; notes are summaries).\n')
+    try:
+        changed = ledger.settings_notes(ledger.settings(config))
+    except (OSError, ValueError):
+        changed = []
+    if changed:
+        head += 'SETTINGS (differ from defaults; tell the user if memory seems not to update): ' + '; '.join(changed) + '\n'
     parts = [head]
-    omitted = []
+    omitted, omitted_kinds = [], {}
     ordered_notes = []
     # Small index for navigation; full bodies only for always-apply user/feedback notes.
     for scope, info in sorted(snapshot.items(), key=lambda item: item[0] != 'project'):
@@ -103,11 +109,13 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
             if len(shown) < len(rows):
                 # Never drop index rows silently (#72): the AI must know the rest exists.
                 text += ('INDEX TRUNCATED: ' + str(len(rows) - len(shown)) + ' of ' + str(len(rows)) + ' ' + scope
-                         + ' index rows not shown; run the index command (Command prefix + index) for the full '
-                         'list before concluding a note does not exist.\n')
+                         + ' index rows not shown; for the full list run: Command prefix + index --full '
+                         '(before concluding a note does not exist).\n')
             parts.append(text)
-        always = sorted((name, body) for name, body in info['notes'].items()
-                        if re.search(r'^type: (user|feedback)\s*$', body, re.M))
+        # Who the user is and what they asked for first; within a type, path order (#83).
+        always = sorted(((name, body) for name, body in info['notes'].items()
+                         if re.search(r'^type: (user|feedback)\s*$', body, re.M)),
+                        key=lambda item: (not re.search(r'^type: user\s*$', item[1], re.M), item[0]))
         ordered_notes.extend((scope, name, str(Path(info['root']) / name), body) for name, body in always)
     for scope, name, path, body in ordered_notes:
         item = '\nNOTE ' + path + '\n' + body + '\nEND NOTE\n'
@@ -115,6 +123,8 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
             parts.append(item)
         else:
             omitted.append('--scope ' + scope + ' --note ' + name)
+            kind = 'user' if re.search(r'^type: user\s*$', body, re.M) else 'feedback'
+            omitted_kinds[kind] = omitted_kinds.get(kind, 0) + 1
     if omitted:
         listed, size = [], 0
         for item in omitted:
@@ -123,10 +133,12 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
             listed.append(item)
             size += len(item) + 2
         more = len(omitted) - len(listed)
-        parts.append('\nPARTIAL SNAPSHOT: ' + str(len(omitted)) + ' user/feedback note bodies omitted. Do NOT dump the '
+        parts.append('\nPARTIAL SNAPSHOT: ' + str(len(omitted)) + ' always-apply note bodies omitted ('
+                     + ', '.join(k + ' ' + str(v) for k, v in sorted(omitted_kinds.items(), reverse=True))
+                     + '). Do NOT dump the '
                      'whole store with context. Only if one may apply to THIS task, read just that note with: '
                      'the Command prefix above + read --scope SCOPE --note RELATIVE_NOTE. Omitted: ' + '; '.join(listed)
-                     + ((' (+' + str(more) + ' more; see the index command)') if more else '') + '\n')
+                     + ((' (+' + str(more) + ' more; Command prefix + index --full)') if more else '') + '\n')
     text = ''.join(parts)[:limit]
     return text
 
@@ -311,10 +323,26 @@ def foreign_paths(roots, state_root, own_state, since):
     return result
 
 
+def worker_guard(event, config):
+    tool = event.get('tool_name', '')
+    path = (event.get('tool_input') or {}).get('file_path') or (event.get('tool_input') or {}).get('path')
+    if not path or tool not in ('Write', 'Edit', 'MultiEdit', 'NotebookEdit'):
+        return {}
+    cwd = Path(event.get('cwd') or os.getcwd()).resolve()
+    path = str(cwd / path) if not Path(path).is_absolute() else path
+    roots = runtime.configuration(config, cwd)[3]
+    if protected(path, roots):
+        return deny('Use memory_runtime.py --config ' + str(config) + ' apply --plan PLAN.json. '
+                    'Direct memory writes cannot keep cross-note corrections and the index consistent.')
+    return {}
+
+
 def handle(event, config):
     name = event.get('hook_event_name')
     if os.environ.get('JASON_DREAM') == '1':
-        return {}  # The background consolidation worker is not a user conversation.
+        # The background consolidation worker is not a user conversation: no recording, recall or
+        # claim checks. The guard against direct memory edits still applies to it (#81).
+        return worker_guard(event, config) if name == 'PreToolUse' else {}
     if name not in EVENTS:
         return {}
     if name in TOOL_EVENTS:

@@ -9,7 +9,7 @@
 ### 日常快速流程（優先於下方詳細流程）
 
 Claude hook 已提供完整最新筆記時直接重用；hook 未通知變更且正文仍在上下文時
-不再讀 SKILL.md 或健檢。缺少／截斷時用 index 讀小索引，再 read --note 只讀相關筆記；
+不再讀 SKILL.md 或健檢。缺少／截斷時用 index 讀小索引（索引本身標示截斷時加 --full），再 read --note 只讀相關筆記；
 其他宿主每輪 index＋相關 read，不用 context 輸出整庫。
 一項新的簡單偏好，用框架 tools/memory_runtime.py --config 目標設定檔 remember
 --scope project --subject user --key STABLE_KEY --value "完整要求" --why "使用者依據"。

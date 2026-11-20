@@ -128,7 +128,7 @@ How to apply: 全局共用；回報時一律先列結論，再說明原因
 
 | 想做什麼 | 指令 |
 |---|---|
-| 目前記了哪些 | `python tools/memory_runtime.py --config .jason-memory.json index` |
+| 目前記了哪些 | `python tools/memory_runtime.py --config .jason-memory.json index`（筆記很多時預設只列前段，加 `--full` 列出全部） |
 | 看某一則筆記 | `python tools/memory_runtime.py --config .jason-memory.json read --note feedback/xxx.md` |
 | 背景整理進度、有沒有出錯 | `python tools/memory_ledger.py --config .jason-memory.json pending` |
 | 立刻整理（`N` 用 `pending` 的 `head`） | `python tools/memory_ledger.py --config .jason-memory.json dream-run --upto N` |
@@ -137,7 +137,7 @@ How to apply: 全局共用；回報時一律先列結論，再說明原因
 | 匯出成一份 Markdown | `python tools/memory_runtime.py --config .jason-memory.json export --output 記憶匯出.md` |
 | 從帳本重新整理全部記憶 | `python tools/memory_dream.py --config .jason-memory.json rebuild --yes` |
 
-- `pending` 顯示 `cursor`（整理到哪）、`pending`（還有幾筆）、`running`（是否正在整理）與 `last_error`（上次錯誤）。
+- `pending` 顯示 `cursor`（整理到哪）、`pending`（還有幾筆）、`running`（是否正在整理）與 `last_error`（上次錯誤）。已中止的工作會改列在 `stale_running` 並說明原因；設定讓背景整理幾乎不會執行時（例如 `dream_every` 遠大於預設），會在 `settings` 說明。
 - `rebuild` 適合記憶整理得亂了或換了更強的模型：先在暫存區重建，成功才替換，舊筆記封存；失敗時現行筆記不動。
 - 筆記是一般 Markdown 檔，也可以直接打開來看。
 - 想回到舊的「當輪保存並通知」：把設定的 `foreground_writes` 改成 `true`（全局版用 `install.py --mode foreground` 重裝）。

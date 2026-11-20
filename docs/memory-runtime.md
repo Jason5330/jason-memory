@@ -188,6 +188,12 @@ frontmatter `type` 一致。以明確 `--type` 重送同一事實時，單一事
 
 背景整理失敗時，`pending` 的 `last_error` 會寫出原因與 worker 最後幾行輸出（已遮蔽憑證），完整輸出在 `.raw/dream.log`（每次執行覆寫）。安裝時若找不到任何 agent CLI，安裝結果的 `warnings` 會直接提醒；帳本照常記錄，資料不會遺失（#71、#73）。
 
+一次背景整理會分段交給 agent，每完成一段就推進游標；後面的段落逾時或失敗時，已完成的段落不會重做（#73）。`pending` 只把真的還在執行的工作列在 `running`；已中止、從未啟動或超過一小時的佔位改列在 `stale_running` 並寫出原因（#84）。`dream_every` 遠大於預設（超過 10 倍）或 `dream_agent` 是自訂指令時，`pending` 的 `settings` 與新對話快照都會說明（#85）；設定檔仍可由使用者自行修改，不會被攔截。
+
+背景程序的身分：寫入許可需要 `JASON_DREAM=1` 加上 `JASON_DREAM_OWNER` 與記憶庫目前保留的工作相符，殘留的 `JASON_DREAM=1` 不會解開前台寫入禁令。背景程序自己的 Claude 工作階段不記錄、不召回，但直接改寫記憶庫的攔截照常生效（#81）。
+
+`index` 預設最多回傳 6000 bytes，截斷時輸出 `rows_not_shown` 與取得完整清單的方式；`index --full` 列出全部索引列（#82）。新對話快照內嵌常駐筆記時 `user` 優先於 `feedback`，放不下的會依類型計數揭露（#83）。索引列與筆記的實際描述不一致（筆記在 runtime 之外被改過）時，`context` 的 `structural_errors` 與快照的 `STORE CHECK` 會點名，下次保存時從筆記重寫索引（#86）。
+
 記憶庫能自行修復的狀態會在下次開啟時處理並在 stderr 說明：`MEMORY.md` 遺失時從現有筆記重建（#78）；單則筆記超過 4 MiB 讀取上限時原封不動移到 `archive/quarantine/`，其他記憶照常運作（#77）。交易紀錄檔無法重播時，錯誤訊息會寫出檔案路徑與處理方式，`jason_doctor` 也會回報（#79）。
 
 - **前台**：Claude 由 hooks 自動追加使用者提示、Shell 工具呼叫與結果、助理最終回覆；Codex 由

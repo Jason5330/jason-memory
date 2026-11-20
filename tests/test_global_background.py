@@ -12,6 +12,8 @@ import unittest
 from unittest.mock import patch
 from zipfile import ZipFile
 
+from worker_identity import as_worker
+
 ROOT = Path(__file__).resolve().parents[1]
 BUILDER = ROOT / "tools/build_global_download.py"
 
@@ -122,12 +124,11 @@ class GlobalBackgroundModeTests(unittest.TestCase):
         b.mkdir()
         config = self.home / 'framework/memory-config.json'
         tools = config.parent / 'tools'
-        self.env['JASON_DREAM'] = '1'
         for project, value in ((a, 'QA-PRIVATE-ALPHA'), (b, 'QA-PRIVATE-BETA')):
-            self.run_py(tools / 'memory_runtime.py', '--config', config, '--project', project,
-                        'remember', '--scope', 'project', '--subject', 'qa', '--key', 'setting',
-                        '--value', value, '--why', 'Synthetic test')
-        self.env.pop('JASON_DREAM')
+            with as_worker(config, project, self.env):
+                self.run_py(tools / 'memory_runtime.py', '--config', config, '--project', project,
+                            'remember', '--scope', 'project', '--subject', 'qa', '--key', 'setting',
+                            '--value', value, '--why', 'Synthetic test')
 
         def event(project, name, **data):
             payload = dict(data, cwd=str(project), session_id='qa-resume', hook_event_name=name)
@@ -212,13 +213,10 @@ print('JASON_DREAM_STATUS: ok')
         b.mkdir()
         self.run_py(ledger, '--config', config, '--project', b, 'append', '--kind', 'prompt',
                     '--data', json.dumps({'text': 'Across all projects, use QA_SHARED_LEGACY_UTC.'}))
-        self.env['JASON_DREAM'] = '1'
-        try:
+        with as_worker(config, b, self.env):
             self.run_py(runtime, '--config', config, '--project', b, 'remember', '--scope', 'global',
                         '--subject', 'qa', '--key', 'legacy', '--value', 'QA_SHARED_LEGACY_UTC',
                         '--why', '來源：ledger seq 1')
-        finally:
-            del self.env['JASON_DREAM']
         rebuilt = json.loads(self.run_py(dream, '--config', config, '--project', b, 'rebuild', '--yes').stdout.splitlines()[-1])
         self.assertTrue(rebuilt['rebuilt'], rebuilt)
         shared = ''.join(p.read_text(encoding='utf-8') for p in (self.home / 'memory/shared').rglob('*.md')
@@ -229,13 +227,10 @@ print('JASON_DREAM_STATUS: ok')
         self.assertEqual(found['record']['data']['text'], 'Across all projects, use QA_SHARED_LEGACY_UTC.')
         # #33: a wrong hash is refused and the shared note keeps the verified source.
         bad = ref[:-1] + ('0' if ref[-1] != '0' else '1')
-        self.env['JASON_DREAM'] = '1'
-        try:
+        with as_worker(config, b, self.env):
             failed = self.run_py(runtime, '--config', config, '--project', b, 'remember', '--scope', 'global',
                                  '--subject', 'qa', '--key', 'legacy', '--value', 'QA_SHARED_LEGACY_UTC',
                                  '--why', '來源：ledger ' + bad, code=1)
-        finally:
-            del self.env['JASON_DREAM']
         self.assertIn('does not resolve', failed.stdout + failed.stderr)
         after = ''.join(p.read_text(encoding='utf-8') for p in (self.home / 'memory/shared').rglob('*.md')
                         if p.name != 'MEMORY.md' and 'archive' not in p.parts)
@@ -293,14 +288,11 @@ print('JASON_DREAM_STATUS: ok')
         def context(project):
             return json.loads(run(runtime, project, 'context').stdout)['stores']
 
-        self.env['JASON_DREAM'] = '1'
-        try:
+        with as_worker(config, b, self.env):
             run(runtime, b, 'remember', '--scope', 'global', '--subject', 'qa', '--key', 'unrelated',
                 '--value', 'QA_SHARED_FROM_B', '--why', 'B source')
             run(runtime, b, 'remember', '--scope', 'project', '--subject', 'qa', '--key', 'b-local',
                 '--value', 'QA_B_LOCAL', '--why', 'B source')
-        finally:
-            del self.env['JASON_DREAM']
         run(ledger, a, 'append', '--kind', 'prompt', '--data',
             json.dumps({'text': 'Across all projects use QA_REBUILT_SHARED. In A only use QA_REBUILT_LOCAL.'}))
         original = run(ledger, a, 'replay').stdout

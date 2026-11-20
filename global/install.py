@@ -81,7 +81,7 @@ def background_instructions(home):
         "just do the task (and, if needed, say it will be organized in the background). The user's current "
         "message and corrections always take precedence.\n"
         "Every message: recall silently before replying. Reuse a current Claude hook snapshot. Without hooks, run the "
-        "runtime with `--config CONFIG --project ACTIVE_PROJECT_ROOT index`, then `read --scope SCOPE --note NOTE` only "
+        "runtime with `--config CONFIG --project ACTIVE_PROJECT_ROOT index` (add `--full` when it reports truncated), then `read --scope SCOPE --note NOTE` only "
         "for notes relevant to this task; never dump the whole store with context. Read this project's and global notes, "
         "never other projects. Use the active workspace root, not the framework directory. An explicit local "
         ".jason-memory.json takes precedence.\n"

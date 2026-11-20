@@ -321,8 +321,51 @@ def _save_state(root, state):
 def pending(root):
     state = dream_state(root)
     total = len(records(root))
-    return {'cursor': state['cursor'], 'head': total, 'pending': max(0, total - state['cursor']),
-            'running': state.get('running'), 'last_error': state.get('last_error')}
+    result = {'cursor': state['cursor'], 'head': total, 'pending': max(0, total - state['cursor']),
+              'running': state.get('running'), 'last_error': state.get('last_error')}
+    run = state.get('running')
+    if run and not _running(state):
+        # The scheduler already ignores this reservation; do not show it as a live job (#84).
+        age = int(time.time() - run.get('started', 0))
+        if run.get('pid'):
+            reason = 'worker process ' + str(run['pid']) + ' is no longer running'
+        elif age >= STALE_SECONDS:
+            reason = 'reservation older than ' + str(STALE_SECONDS) + ' s'
+        else:
+            reason = 'worker never started (no pid within ' + str(STARTING_GRACE) + ' s)'
+        result['running'] = None
+        result['stale_running'] = dict(run, age_seconds=age, reason=reason,
+                                       note='no worker is running; the next trigger or dream-run starts a new one')
+    return result
+
+
+def settings_notes(opts):
+    """Plain statements about settings that quietly change how memory behaves (#85). The settings
+    file stays user-editable; changes are disclosed, not blocked."""
+    notes = []
+    default = DEFAULT_SETTINGS['dream_every'] if 'dream_every' in DEFAULT_SETTINGS else 20
+    if not opts.get('enabled'):
+        return notes  # Foreground mode without a ledger is a supported setup, not a silent change.
+    if opts.get('dream_every', default) > 10 * default:
+        notes.append('ledger.dream_every=' + str(opts['dream_every']) + ' (default ' + str(default) + '): '
+                     'background consolidation will rarely or never run; use dream-run to consolidate now')
+    if isinstance(opts.get('dream_agent'), list):
+        notes.append('ledger.dream_agent is a custom command: ' + ' '.join(map(str, opts['dream_agent']))[:200])
+    return notes
+
+
+def advance_cursor(root, owner, upto):
+    """Record progress of a running job without finishing it (per-chunk progress, #73)."""
+    state = dream_state(root)
+    if (state.get('running') or {}).get('owner') != owner:
+        return False
+    existing = records(root)
+    if upto <= state['cursor'] or upto > len(existing):
+        return False
+    state['cursor'] = upto
+    state['cursor_hash'] = existing[upto - 1]['hash']
+    _save_state(root, state)
+    return True
 
 
 def _alive(pid):
@@ -490,7 +533,8 @@ def dream_run(config, project, upto, opts, owner=None):
             return 65
         upto = min(upto, len(existing))
         target_hash = existing[upto - 1]['hash'] if upto > start else None
-    env = dict(os.environ, JASON_DREAM='1', JASON_MEMORY_CONFIG=str(config), JASON_MEMORY_PROJECT=str(project),
+    env = dict(os.environ, JASON_DREAM='1', JASON_DREAM_OWNER=owner, JASON_MEMORY_CONFIG=str(config),
+               JASON_MEMORY_PROJECT=str(project),
                JASON_DREAM_FROM=str(start + 1), JASON_DREAM_UPTO=str(upto), JASON_MEMORY_ROOT=str(root))
     error = None
     if upto > start:
@@ -560,6 +604,9 @@ def main():
             else:
                 verify(root)  # Status of a ledger that fails verification is an error, not a count.
                 result = pending(root)
+                notes = settings_notes(settings(args.config))
+                if notes:
+                    result['settings'] = notes
         runtime.emit_json(result)
         return 0
     except (OSError, ValueError, KeyError, TypeError) as exc:
