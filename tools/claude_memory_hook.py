@@ -356,10 +356,7 @@ def foreground(config, cwd):
     """Roots for one hook event without the store writer lock, so a conversation never waits for a
     background save (#75). Repairs that write (a pending journal, a missing or oversized index) still
     run under the lock first."""
-    cfg, project, lock_root, roots = runtime.configuration(config, cwd)
-    if runtime.needs_repair(cfg, lock_root, roots):
-        with runtime.opened(config, cwd) as (_, project, roots):
-            pass
+    _, project, roots = runtime.foreground_roots(config, cwd)
     yield project, roots
 
 

@@ -74,6 +74,53 @@ class ForegroundNeverWaitsTests(unittest.TestCase):
         self.assertEqual(len(ledger.records(self.root)), before + 1)
         self.assertIsNone(holder.poll(), 'the lock holder finished before the checks; the test proved nothing')
 
+    def test_a_save_in_progress_is_not_mistaken_for_a_repair(self):
+        """CI case: the journal of a running save plus a busy lock must not cost the turn its memory."""
+        holder = self.background('''
+            import sys, time
+            from pathlib import Path
+            sys.path.insert(0, sys.argv[1] + '/tools')
+            import memory_runtime as runtime
+            cfg, project, lock_root, roots = runtime.configuration(Path(sys.argv[2]))
+            with runtime.storelib.locked(lock_root):
+                (roots['project'] / '.transaction.json').write_text('{"in": "progress"}', encoding='utf-8')
+                print('held', flush=True)
+                time.sleep(14)
+        ''')
+        self.assertEqual(holder.stdout.readline().strip(), 'held')
+        result, seconds = self.hook('SessionStart')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('MEMORY UNAVAILABLE', result.stdout)
+        self.assertNotIn('STORE CHECK', result.stdout)
+        self.assertIn(r'\nNOTE ', result.stdout)
+        self.assertLess(seconds, 10)
+        self.assertIsNone(holder.poll(), 'the lock holder finished before the check; the test proved nothing')
+
+    def test_codex_turns_are_recorded_while_a_save_holds_the_lock(self):
+        holder = self.background('''
+            import sys, time
+            from pathlib import Path
+            sys.path.insert(0, sys.argv[1] + '/tools')
+            import memory_runtime as runtime
+            cfg, project, lock_root, roots = runtime.configuration(Path(sys.argv[2]))
+            with runtime.storelib.locked(lock_root):
+                print('held', flush=True)
+                time.sleep(14)
+        ''')
+        self.assertEqual(holder.stdout.readline().strip(), 'held')
+        before = len(ledger.records(self.root))
+        payload = json.dumps({'type': 'agent-turn-complete', 'turn-id': 't75', 'thread-id': 'th75',
+                              'cwd': str(self.project), 'input-messages': ['QA codex prompt'],
+                              'last-assistant-message': 'QA codex reply'})
+        start = time.monotonic()
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/codex_notify.py'), payload], capture_output=True,
+                                text=True, encoding='utf-8', env=self.env, cwd=str(self.project), timeout=120)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr.strip(), '')
+        self.assertLess(time.monotonic() - start, 8)
+        self.assertEqual(len(ledger.records(self.root)), before + 2)
+        self.assertIsNone(holder.poll(), 'the lock holder finished before the check; the test proved nothing')
+
     def test_snapshots_taken_during_saves_are_consistent(self):
         saver = self.background('''
             import os, sys, time

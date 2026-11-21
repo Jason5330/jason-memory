@@ -365,6 +365,23 @@ def needs_repair(cfg, lock_root, roots):
     return False
 
 
+def foreground_roots(config, project=None):
+    """Roots for a conversation event (Claude hook, Codex notify) without holding the writer lock, so
+    recording and recall never queue behind a background save (#75). A repair that writes (an
+    interrupted journal, a missing or oversized index) is tried under the lock for a few seconds. If
+    the lock stays busy, the journal belongs to a save in progress: carry on with the store as it is;
+    the next command that gets the lock replays a journal that really was interrupted."""
+    cfg, project, lock_root, roots = configuration(config, project)
+    if needs_repair(cfg, lock_root, roots):
+        try:
+            with opened(config, project, lock_timeout=3) as (cfg, project, roots):
+                pass
+        except ValueError as exc:
+            if 'busy' not in str(exc):
+                raise
+    return cfg, project, roots
+
+
 def quarantine_oversized(root):
     """A note over the reading cap would fail every command for the whole store (#77). Move it,
     byte for byte, to archive/quarantine/ so the store keeps working and the content stays reviewable."""

@@ -47,8 +47,8 @@
     "tests/worker_identity.py": "b2fbe868bffe2521eeee8ab58e44cf838dd8f2b45ff42523f9d12970cd983c78",
     "tools/build_download.py": "a148b47fef111c72a0584340025c1f4a98d442a5e4de7a93d05ee09ce7d387a9",
     "tools/build_global_download.py": "ef2f61598fd306b3afae593bec81b548c3f635b0cfef0b3f84be1e9c481aa29f",
-    "tools/claude_memory_hook.py": "55bb03f2908072d452d1ba18552e6f017673ff53b27f3b70c776939a3dfe16ab",
-    "tools/codex_notify.py": "50e937cb714acb1ede593c3e4503b2ee87425ed1ce25cb3a2e15b86f06ed9823",
+    "tools/claude_memory_hook.py": "01cd79a39437ede2125fe4d261804b5da19769428729744b652bad7e5a0e512b",
+    "tools/codex_notify.py": "bf9a782c81fcb491ce4b15b2d6baeab7f4feb0ed458ad9203cb3770324063120",
     "tools/hook_settings.py": "ad48a66505f378b4b8f91911455417953762bcae1f237850aa10a6212f49446f",
     "tools/install_hooks.py": "6b4e86c5b9c66f0ed044969a81b5cc8fd7fb0ed87bfae70357f4958dbe2e8dca",
     "tools/jason_check.py": "3fcc5e6e66020533558a12418a3733efc25a46e895e68ce127d39607398e10be",
@@ -56,7 +56,7 @@
     "tools/memory_dream.py": "b10441ebbfc220df6bb713e8e8b8b88c8ff287ec9af6d5b44b0c97ee6ff79fb4",
     "tools/memory_facts.py": "b452a31c3d611d951f6fb5e9631cd6307a9e07ef226bda9e966352f74dd06944",
     "tools/memory_ledger.py": "3bed163ac8110d9686e7d15bed082d4735e646cc3b308aae0e90adb9883c7dc4",
-    "tools/memory_runtime.py": "b1aa1d1f76098174c3fe777619975033715960ac2590bddf1519cc24ad68ecb5",
+    "tools/memory_runtime.py": "fd6079b8419efcd9a23cbe5d7a436f9fb8901784c6d8f087e4e45ffc034f46c5",
     "tools/purge_memory.py": "e8c215465cdde2d9c2ea3913ba60926b630424a9712b01725be1720a6163139d"
   }
 }

@@ -54,8 +54,10 @@ def handle(payload, cwd=None):
         return None
     session = str(payload.get('thread-id') or payload.get('turn-id') or '')
     turn = str(payload.get('turn-id') or '')
-    with runtime.opened(config, project) as (_, project, roots):
-        root = roots['project']
+    # The ledger lock only: recording a Codex turn never waits for a background note save (#75).
+    _, project, roots = runtime.foreground_roots(config, project)
+    root = roots['project']
+    with ledger.ledger_lock(root):
         # Codex may deliver the same turn again (#37): parts already recorded for this stable
         # turn-id are skipped, so a retry after an interrupted delivery only adds what is missing.
         seen = set()
