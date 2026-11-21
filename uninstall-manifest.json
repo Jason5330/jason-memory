@@ -24,7 +24,7 @@
     "global/INSTALL.cmd": "e7c9337964a51374ff6f2c6323e9ae84844056835cb01256e3d0f3e87c61c4de",
     "global/README.md": "2b366e3049942b3add18f038be280e97a190e51ff2d4e3afc27d6fcd0fd930c4",
     "global/SKILL.md": "0245ea526d8f44a7cfee24d475a5815126a5c4683eefc94a970aa3983e94f270",
-    "global/global_store.py": "cb96c6e94230f1c2637335a467640c8584cc817992d9cf214cedab05bdc048c9",
+    "global/global_store.py": "320632df6fdebeb1835d3744f900638dfbf25be2dac8b864a2ad6e278d44d53b",
     "global/install.py": "8636f3c2011c821f219e6b0cfd1cba6c6a4aaccb942539cff429886751a4289b",
     "templates/MEMORY.md": "bb5884fd52e2bc526de86a04c63f0cf83aa290917c36c8266f163e5c9004ca6b",
     "templates/example-feedback.md": "3d2449998dd7816aa858620cc05c5c16ee79ae1b2f230190751b03be261d819c",
@@ -47,7 +47,7 @@
     "tests/worker_identity.py": "b2fbe868bffe2521eeee8ab58e44cf838dd8f2b45ff42523f9d12970cd983c78",
     "tools/build_download.py": "a148b47fef111c72a0584340025c1f4a98d442a5e4de7a93d05ee09ce7d387a9",
     "tools/build_global_download.py": "ef2f61598fd306b3afae593bec81b548c3f635b0cfef0b3f84be1e9c481aa29f",
-    "tools/claude_memory_hook.py": "2889ec4a15ab8b97943a8728d9e2744af49e7a5881c62049f0ac7d20328e064d",
+    "tools/claude_memory_hook.py": "0a1474a37359ef13aa5a8ed39c9b498fa1ceb9e5708d4ec986c8f9990057cbdb",
     "tools/codex_notify.py": "50e937cb714acb1ede593c3e4503b2ee87425ed1ce25cb3a2e15b86f06ed9823",
     "tools/hook_settings.py": "ad48a66505f378b4b8f91911455417953762bcae1f237850aa10a6212f49446f",
     "tools/install_hooks.py": "6b4e86c5b9c66f0ed044969a81b5cc8fd7fb0ed87bfae70357f4958dbe2e8dca",
@@ -56,7 +56,7 @@
     "tools/memory_dream.py": "b10441ebbfc220df6bb713e8e8b8b88c8ff287ec9af6d5b44b0c97ee6ff79fb4",
     "tools/memory_facts.py": "b452a31c3d611d951f6fb5e9631cd6307a9e07ef226bda9e966352f74dd06944",
     "tools/memory_ledger.py": "3bed163ac8110d9686e7d15bed082d4735e646cc3b308aae0e90adb9883c7dc4",
-    "tools/memory_runtime.py": "a6306bc2969845e3ba639935d3dafbb9d6229b348379b066fa7bb2d268b736ab",
+    "tools/memory_runtime.py": "b1aa1d1f76098174c3fe777619975033715960ac2590bddf1519cc24ad68ecb5",
     "tools/purge_memory.py": "e8c215465cdde2d9c2ea3913ba60926b630424a9712b01725be1720a6163139d"
   }
 }

@@ -36,14 +36,14 @@ def safe(path, root):
 
 
 @contextlib.contextmanager
-def locked(home):
+def locked(home, timeout=10):
     home.mkdir(parents=True, exist_ok=True)
     path = safe(home / '.writer.lock', home)
     with path.open('a+b') as stream:
         if path.stat().st_size == 0:
             stream.write(b'0')
             stream.flush()
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + timeout
         while True:
             try:
                 stream.seek(0)

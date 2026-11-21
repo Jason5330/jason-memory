@@ -363,11 +363,14 @@ def foreground(config, cwd):
     yield project, roots
 
 
-def consistent_snapshot(config, cwd, roots, attempts=3):
-    """Read the store without the writer lock. A save replaces files atomically and keeps its journal
-    until it ends, so a read that starts and ends with no journal and the same fingerprint saw one
-    consistent state. Otherwise retry, and as a last resort read under the lock (#75)."""
+def consistent_snapshot(config, cwd, roots, attempts=5):
+    """Read the store without the writer lock (#75). A save replaces each file atomically and keeps its
+    journal until it ends. A read that starts and ends with no journal reads only committed files; it is
+    used when nothing changed meanwhile, or when its index still matches its notes (a later save only
+    made it slightly older, which the next turn refreshes). Otherwise retry, then read under the lock for
+    a few seconds at most, and if saves keep it busy, use the last committed read instead of no memory."""
     cfg, _, lock_root, _ = runtime.configuration(config, cwd)
+    last = None
     for _ in range(attempts):
         before = store_fingerprint(roots)
         if not runtime.journal_pending(cfg, lock_root, roots):
@@ -375,11 +378,21 @@ def consistent_snapshot(config, cwd, roots, attempts=3):
                 snapshot = runtime.context(roots)
             except (OSError, ValueError):
                 break  # Something to repair (an oversized note, say): the locked path fixes it.
-            if not runtime.journal_pending(cfg, lock_root, roots) and store_fingerprint(roots) == before:
-                return snapshot, before
-        time.sleep(0.2)
-    with runtime.opened(config, cwd) as (_, _, locked_roots):
-        return runtime.context(locked_roots), store_fingerprint(locked_roots)
+            if not runtime.journal_pending(cfg, lock_root, roots):
+                if store_fingerprint(roots) == before:
+                    return snapshot, before
+                if not any('out of sync with notes' in (info['audit'].get('structural_errors') or '')
+                           for info in snapshot.values()):
+                    return snapshot, before  # `before`: the next prompt sees the store changed and refreshes.
+                last = (snapshot, before)
+        time.sleep(0.1)
+    try:
+        with runtime.opened(config, cwd, lock_timeout=3) as (_, _, locked_roots):
+            return runtime.context(locked_roots), store_fingerprint(locked_roots)
+    except ValueError as exc:
+        if last is not None and 'busy' in str(exc):
+            return last
+        raise
 
 
 def store_fingerprint(roots):

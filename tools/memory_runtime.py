@@ -326,9 +326,9 @@ def commit_global_rebuild(home, roots, plans):
 
 
 @contextlib.contextmanager
-def opened(config, project=None):
+def opened(config, project=None, lock_timeout=10):
     cfg, project, lock_root, roots = configuration(config, project)
-    with storelib.locked(lock_root):
+    with storelib.locked(lock_root, lock_timeout):
         if cfg['mode'] == 'global':
             recover_global_rebuild(lock_root)
         for root in roots.values():
