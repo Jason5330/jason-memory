@@ -114,6 +114,60 @@ class ForegroundNeverWaitsTests(unittest.TestCase):
         self.assertIn(r'\nNOTE ', result.stdout)  # Notes are inlined (the output is JSON).
 
 
+class UnsettledReadTests(unittest.TestCase):
+    """The fast-machine case CI hit: saves finish during every read and the lock is never free."""
+
+    def test_recall_still_gets_committed_notes_and_no_false_structural_verdict(self):
+        import itertools
+        from unittest import mock
+        import claude_memory_hook as hook
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp).resolve()
+            config = project / '.jason-memory.json'
+            config.write_text(json.dumps({'version': 1, 'mode': 'project', 'memory_root': '.jason-memory'}),
+                              encoding='utf-8')
+            with runtime.opened(config) as (_, _, roots):
+                runtime.remember(roots['project'], 'qa', 'rule', 'QA_RULE_UNSETTLED', 'x')
+            real_context = runtime.context
+
+            def torn_context(roots):
+                snapshot = real_context(roots)
+                for info in snapshot.values():  # What doctor reports when it sees a save half done.
+                    info['audit']['structural_errors'] = 'ISSUE: unfinished save journal present: x'
+                return snapshot
+            changing = itertools.count()
+            with mock.patch.object(hook, 'store_fingerprint', side_effect=lambda roots: next(changing)), \
+                    mock.patch.object(runtime, 'context', side_effect=torn_context), \
+                    mock.patch.object(runtime, 'opened', side_effect=ValueError('Memory busy; retry later.')), \
+                    mock.patch.object(hook.time, 'sleep'):
+                snapshot, _ = hook.consistent_snapshot(config, project, roots)
+            info = snapshot['project']
+            self.assertIn('QA_RULE_UNSETTLED', ''.join(info['notes'].values()))
+            self.assertEqual(info['audit']['structural_errors'], '')
+
+    def test_a_note_retired_mid_read_is_retried_not_fatal(self):
+        import itertools
+        from unittest import mock
+        import claude_memory_hook as hook
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp).resolve()
+            config = project / '.jason-memory.json'
+            config.write_text(json.dumps({'version': 1, 'mode': 'project', 'memory_root': '.jason-memory'}),
+                              encoding='utf-8')
+            with runtime.opened(config) as (_, _, roots):
+                pass
+            calls = itertools.count()
+            real_context = runtime.context
+
+            def flaky(roots):
+                if next(calls) == 0:
+                    raise FileNotFoundError('retired while listing')
+                return real_context(roots)
+            with mock.patch.object(runtime, 'context', side_effect=flaky), mock.patch.object(hook.time, 'sleep'):
+                snapshot, _ = hook.consistent_snapshot(config, project, roots)
+            self.assertIn('project', snapshot)
+
+
 class LedgerLockTests(unittest.TestCase):
     def test_ledger_lock_is_reentrant_and_separate_from_the_store_lock(self):
         with tempfile.TemporaryDirectory() as tmp:

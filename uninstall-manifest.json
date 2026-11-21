@@ -47,7 +47,7 @@
     "tests/worker_identity.py": "b2fbe868bffe2521eeee8ab58e44cf838dd8f2b45ff42523f9d12970cd983c78",
     "tools/build_download.py": "a148b47fef111c72a0584340025c1f4a98d442a5e4de7a93d05ee09ce7d387a9",
     "tools/build_global_download.py": "ef2f61598fd306b3afae593bec81b548c3f635b0cfef0b3f84be1e9c481aa29f",
-    "tools/claude_memory_hook.py": "0a1474a37359ef13aa5a8ed39c9b498fa1ceb9e5708d4ec986c8f9990057cbdb",
+    "tools/claude_memory_hook.py": "55bb03f2908072d452d1ba18552e6f017673ff53b27f3b70c776939a3dfe16ab",
     "tools/codex_notify.py": "50e937cb714acb1ede593c3e4503b2ee87425ed1ce25cb3a2e15b86f06ed9823",
     "tools/hook_settings.py": "ad48a66505f378b4b8f91911455417953762bcae1f237850aa10a6212f49446f",
     "tools/install_hooks.py": "6b4e86c5b9c66f0ed044969a81b5cc8fd7fb0ed87bfae70357f4958dbe2e8dca",
