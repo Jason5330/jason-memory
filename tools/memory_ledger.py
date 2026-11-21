@@ -14,6 +14,8 @@ after the configured command succeeds, so a failure is retried later and records
 skipped nor processed twice; with no new records nothing runs.
 """
 import argparse
+import contextlib
+import functools
 import hashlib
 import json
 import os
@@ -63,6 +65,38 @@ def settings(config):
         merged['dream_command'] = [sys.executable, str(Path(__file__).resolve().with_name('memory_dream.py')),
                                    '--config', str(Path(config).absolute()), 'consolidate']
     return merged
+
+
+_LEDGER_HELD = {}
+
+
+@contextlib.contextmanager
+def ledger_lock(root):
+    """Serialize writes to .raw (ledger, mirrors, dream.json). Re-entrant within one process.
+    Taken inside the store writer lock where both are held, never the other way round (#75)."""
+    folder = raw_root(root)
+    key = os.path.normcase(str(folder))
+    if _LEDGER_HELD.get(key):
+        _LEDGER_HELD[key] += 1
+        try:
+            yield
+        finally:
+            _LEDGER_HELD[key] -= 1
+        return
+    with runtime.storelib.locked(folder):
+        _LEDGER_HELD[key] = 1
+        try:
+            yield
+        finally:
+            _LEDGER_HELD.pop(key, None)
+
+
+def _with_ledger_lock(function):
+    @functools.wraps(function)
+    def wrapper(root, *args, **kwargs):
+        with ledger_lock(root):
+            return function(root, *args, **kwargs)
+    return wrapper
 
 
 def raw_root(root):
@@ -165,8 +199,9 @@ def _clip(value, sensitive=False):
     return value
 
 
+@_with_ledger_lock
 def append(root, kind, data, session=''):
-    """Append one record. Callers must hold the store writer lock (runtime.opened)."""
+    """Append one record under the ledger lock; the store writer lock is not needed (#75)."""
     if not isinstance(kind, str) or not kind:
         raise ValueError('Ledger record needs a kind')
     if kind in ('prompt', 'assistant', 'tool') and not isinstance(data, dict):
@@ -202,6 +237,7 @@ def append(root, kind, data, session=''):
     return record
 
 
+@_with_ledger_lock
 def mirror(root, source, session=''):
     """Copy a document byte-for-byte into the blob store and record its fingerprint."""
     source = Path(source).resolve(strict=True)
@@ -330,7 +366,8 @@ def dream_state(root):
         except FileNotFoundError:
             continue
         fresh = {'cursor': 0, 'state_reset': {'kept': str(kept), 'reason': reason[:200], 'at': time.time()}}
-        _save_state(root, fresh)
+        with ledger_lock(root):
+            _save_state(root, fresh)
         print('Jason-memory: consolidation state ' + str(path) + ' was unreadable (' + reason[:200] + '); kept it as '
               + str(kept) + ' and restarted consolidation from the beginning (cursor 0)', file=sys.stderr)
         return fresh
@@ -406,6 +443,7 @@ def settings_notes(opts):
     return notes
 
 
+@_with_ledger_lock
 def advance_cursor(root, owner, upto):
     """Record progress of a running job without finishing it (per-chunk progress, #73)."""
     state = dream_state(root)
@@ -456,6 +494,7 @@ def _running(state):
     return time.time() - run.get('started', 0) < STARTING_GRACE
 
 
+@_with_ledger_lock
 def claim_job(root, kind, upto):
     """Reserve the store's single consolidation slot. Caller holds the writer lock."""
     state = dream_state(root)
@@ -468,6 +507,7 @@ def claim_job(root, kind, upto):
     return owner
 
 
+@_with_ledger_lock
 def release_job(root, owner, upto=None, error=None):
     """Finish a job: advance the cursor on success, record the error otherwise. Only the current
     owner may finish: a stale or replaced worker changes nothing (no cursor, no error, no marker)."""
@@ -503,9 +543,10 @@ def verified_records(root):
     return existing
 
 
+@_with_ledger_lock
 def maybe_dream(root, config, project, opts, spawn=None):
     """Start a detached worker once enough new records exist. Never blocks the foreground.
-    Caller holds the writer lock."""
+    Runs under the ledger lock (not the store writer lock)."""
     if not opts.get('enabled') or not opts.get('dream_command'):
         return None
     state = dream_state(root)
@@ -573,10 +614,11 @@ def dream_run(config, project, upto, opts, owner=None):
         elif (dream_state(root).get('running') or {}).get('owner') != owner:
             return 75  # Our reservation was replaced (stale); do not race the new owner.
         else:
-            state = dream_state(root)
-            if not state['running'].get('pid'):
-                state['running']['pid'] = os.getpid()  # The worker records itself (#80).
-                _save_state(root, state)
+            with ledger_lock(root):
+                state = dream_state(root)
+                if not state['running'].get('pid'):
+                    state['running']['pid'] = os.getpid()  # The worker records itself (#80).
+                    _save_state(root, state)
         start = dream_state(root)['cursor']
         try:
             existing = verified_records(root)

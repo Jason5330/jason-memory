@@ -560,6 +560,7 @@ def main(argv):
     indexed = set()
     graph = {base: set() for base in notes}
     targets = _index_targets(itext)
+    pointer_paths, texts = {}, {}  # Reused by the drift check: each note is resolved and read once.
     ptr_counts = {}
     # every index (file.md) pointer must resolve to a real file AT THE POINTED PATH.
     # Match the link target up to whitespace / '#' / ')' (so anchored `(note.md#sec)`
@@ -579,6 +580,7 @@ def main(argv):
                           f"path relative to the store): {tgt}")
             continue
         full = os.path.realpath(os.path.join(root, tgt.replace("\\", "/")))
+        pointer_paths[tgt] = full
         if not _contained(full, root_abs):
             issues.append(f"index pointer escapes the store root: {tgt}")
             continue
@@ -607,29 +609,6 @@ def main(argv):
         else:
             issues.append(f"index points to a missing file: {tgt}")
 
-    # A runtime-written index mirrors each note's frontmatter description. A row that no longer
-    # matches means the note was edited outside the runtime (#86); hand-written indexes are not
-    # held to this, so the check runs only on the runtime's own index header.
-    if itext.lstrip().startswith("# 記憶索引 (Jason-memory)"):
-        drifted = []
-        for row in itext.splitlines():
-            m = re.match(r"^- \[([^\]]*)\]\(([^)\s]+)\) — (.*)$", row)
-            if not m or _is_remote_url(m.group(2)) or "://" in m.group(2):
-                continue
-            full = os.path.realpath(os.path.join(root, m.group(2).replace("\\", "/")))
-            if not _contained(full, root_abs) or not os.path.isfile(full) or _excluded_dir(full, root_abs):
-                continue
-            text = _read(full)
-            if not isinstance(text, str):
-                continue
-            fm, _, _ = _frontmatter(text)
-            if fm and (fm.get("description", "") != m.group(3) or fm.get("name", "") != m.group(1)):
-                drifted.append(m.group(2))
-        if drifted:
-            issues.append("index out of sync with notes (edited outside the runtime?): "
-                          + ", ".join(drifted[:20]) + (f" (+{len(drifted) - 20} more)" if len(drifted) > 20 else "")
-                          + " — the next memory save rewrites the index from the notes")
-
     # duplicate index pointers: the same note pointed to from more than one index line
     # is redundant (INFO — a thematic index may cross-reference on purpose, so it does
     # not fail). Count the raw (non-deduped) targets that resolved to a real note.
@@ -654,6 +633,7 @@ def main(argv):
             issues.append(f"note file is not valid UTF-8: {base}; "
                           "content was not validated")
             continue
+        texts[base] = text
         fm, fm_problems, body = _frontmatter(text)
         for w in re.findall(r"\[\[([^\]]+)\]\]", _active_markdown(body)):
             # Jason wikilinks are bare slugs. Tolerate an Obsidian-style display alias
@@ -734,6 +714,27 @@ def main(argv):
                     issues.append(msg)
                 elif not _label_has_content(body, _HOW_RE):
                     issues.append(f"{base}: 'How to apply:' line must have non-empty explanatory content")
+
+    # A runtime-written index mirrors each note's frontmatter description. A row that no longer
+    # matches means the note was edited outside the runtime (#86); hand-written indexes are not
+    # held to this, so the check runs only on the runtime's own index header.
+    if itext.lstrip().startswith("# 記憶索引 (Jason-memory)"):
+        drifted = []
+        for row in itext.splitlines():
+            m = re.match(r"^- \[([^\]]*)\]\(([^)\s]+)\) — (.*)$", row)
+            full = pointer_paths.get(m.group(2)) if m else None
+            if full is None or not os.path.isfile(full) or _excluded_dir(full, root_abs):
+                continue
+            text = texts.get(_real_basename(full, notes))
+            if not isinstance(text, str):
+                continue
+            fm, _, _ = _frontmatter(text)
+            if fm and (fm.get("description", "") != m.group(3) or fm.get("name", "") != m.group(1)):
+                drifted.append(m.group(2))
+        if drifted:
+            issues.append("index out of sync with notes (edited outside the runtime?): "
+                          + ", ".join(drifted[:20]) + (f" (+{len(drifted) - 20} more)" if len(drifted) > 20 else "")
+                          + " — the next memory save rewrites the index from the notes")
 
     # Reachability, not incoming degree: isolated cycles have references but no
     # recall entry point. Traverse only from validated active index pointers.

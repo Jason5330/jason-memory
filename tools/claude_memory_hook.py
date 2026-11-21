@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Silent Claude context refresh and bounded memory-write/notice guard."""
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -350,6 +351,37 @@ def verified_claim(response, state, roots):
     return all(path.is_absolute() and path in {Path(p) for p in verified} for path in linked)
 
 
+@contextlib.contextmanager
+def foreground(config, cwd):
+    """Roots for one hook event without the store writer lock, so a conversation never waits for a
+    background save (#75). Repairs that write (a pending journal, a missing or oversized index) still
+    run under the lock first."""
+    cfg, project, lock_root, roots = runtime.configuration(config, cwd)
+    if runtime.needs_repair(cfg, lock_root, roots):
+        with runtime.opened(config, cwd) as (_, project, roots):
+            pass
+    yield project, roots
+
+
+def consistent_snapshot(config, cwd, roots, attempts=3):
+    """Read the store without the writer lock. A save replaces files atomically and keeps its journal
+    until it ends, so a read that starts and ends with no journal and the same fingerprint saw one
+    consistent state. Otherwise retry, and as a last resort read under the lock (#75)."""
+    cfg, _, lock_root, _ = runtime.configuration(config, cwd)
+    for _ in range(attempts):
+        before = store_fingerprint(roots)
+        if not runtime.journal_pending(cfg, lock_root, roots):
+            try:
+                snapshot = runtime.context(roots)
+            except (OSError, ValueError):
+                break  # Something to repair (an oversized note, say): the locked path fixes it.
+            if not runtime.journal_pending(cfg, lock_root, roots) and store_fingerprint(roots) == before:
+                return snapshot, before
+        time.sleep(0.2)
+    with runtime.opened(config, cwd) as (_, _, locked_roots):
+        return runtime.context(locked_roots), store_fingerprint(locked_roots)
+
+
 def store_fingerprint(roots):
     """Cheap change detector: names, sizes and mtimes of notes and indexes (no reads)."""
     rows = []
@@ -442,7 +474,7 @@ def handle(event, config):
             saved = runtime.read_json(saved_path)
             if saved.get('project_root'):
                 cwd = Path(saved['project_root']).resolve(strict=True)
-    with runtime.opened(config, cwd) as (_, project, roots):
+    with foreground(config, cwd) as (project, roots):
         if name == 'PreToolUse':
             tool = event.get('tool_name', '')
             data = event.get('tool_input') or {}
@@ -475,18 +507,22 @@ def handle(event, config):
                     ledger.maybe_dream(roots['project'], config, project, ledger_settings(config))
                 if failed or not handles:
                     return {}
-            if state:
-                for handle in handles:
-                    for root in roots.values():
-                        if handle.get('receipt_root') != str(root):
-                            continue
-                        try:
-                            runtime.check_receipt(root, handle['receipt'], state.get('turn_started_ns', time.time_ns()))
-                            state.setdefault('receipts', []).append({'receipt': handle['receipt'], 'receipt_root': str(root)})
-                        except (OSError, ValueError, KeyError, TypeError):
-                            pass
-                state['receipts'] = state.get('receipts', [])[-128:]
-                runtime.storelib.atomic_write(state_path, json.dumps(state))
+            # Parallel tool calls of one session no longer queue on the store lock; keep their
+            # receipt updates from overwriting each other with the short ledger lock (#75).
+            with ledger.ledger_lock(roots['project']):
+                state = runtime.read_json(state_path) if state_path.exists() else {}
+                if state:
+                    for handle in handles:
+                        for root in roots.values():
+                            if handle.get('receipt_root') != str(root):
+                                continue
+                            try:
+                                runtime.check_receipt(root, handle['receipt'], state.get('turn_started_ns', time.time_ns()))
+                                state.setdefault('receipts', []).append({'receipt': handle['receipt'], 'receipt_root': str(root)})
+                            except (OSError, ValueError, KeyError, TypeError):
+                                pass
+                    state['receipts'] = state.get('receipts', [])[-128:]
+                    runtime.storelib.atomic_write(state_path, json.dumps(state))
             return {}
         fingerprint = store_fingerprint(roots)
         opts = ledger_settings(config)
@@ -508,7 +544,7 @@ def handle(event, config):
                 and state.get('files') is not None and not success_claim(event.get('last_assistant_message', ''))
                 and state.get('versions') == state.get('seen')):
             return {}  # No change during this turn and no memory claim: skip the full-store audit.
-        snapshot = runtime.context(roots)
+        snapshot, fingerprint = consistent_snapshot(config, cwd, roots)
         versions = {s: i['revision'] for s, i in snapshot.items()}
         current_files = {str(Path(i['root']) / p): runtime.storelib.digest(t)
                          for i in snapshot.values() for p, t in i['notes'].items()}

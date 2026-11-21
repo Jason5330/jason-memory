@@ -28,9 +28,10 @@ facts_spec.loader.exec_module(facts)
 
 
 def safe(path, root):
-    if path.is_symlink() or path.resolve() != path:
+    resolved = path.resolve()  # One resolve: on Windows each one is several system calls (#75).
+    if path.is_symlink() or resolved != path:
         raise ValueError('Redirected memory path is not supported: ' + str(path))
-    path.resolve().relative_to(root)
+    resolved.relative_to(root)
     return path
 
 

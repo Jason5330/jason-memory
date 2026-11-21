@@ -94,6 +94,11 @@ def foreground_writes_allowed(cfg, roots=None):
 
 
 def note_path(root, name):
+    return storelib.safe(root / note_name(name), root)
+
+
+def note_name(name):
+    """The rules for an active note path, as text only (no filesystem access)."""
     if not isinstance(name, str) or '\\' in name:
         raise ValueError('Use forward-slash relative note paths')
     part = Path(name)
@@ -102,26 +107,48 @@ def note_path(root, name):
             part.name.casefold() == 'memory.md' or part.suffix.casefold() != '.md'):
         raise ValueError('Invalid active note path: ' + name)
     storelib.slug_check(part.stem)
-    return storelib.safe(root / part, root)
+    return part
+
+
+REPARSE_POINT = 0x400  # FILE_ATTRIBUTE_REPARSE_POINT: symlinks and junctions on Windows.
+
+
+def _redirected(entry):
+    """Symlink or junction, from the directory listing itself: no extra system call per file (#75)."""
+    return entry.is_symlink() or bool(getattr(entry.stat(follow_symlinks=False), 'st_file_attributes', 0)
+                                      & REPARSE_POINT)
 
 
 def notes(root):
+    """Every active note. Each folder is listed once; redirected entries are refused exactly as
+    storelib.safe would refuse them, but without resolving every path again (#75)."""
     result = {}
-    def walk_error(error):
-        raise error
-    for folder, dirs, files in os.walk(root, followlinks=False, onerror=walk_error):
-        dirs[:] = sorted(d for d in dirs if d != 'archive' and not d.startswith('.'))
-        for directory in dirs:
-            storelib.safe(Path(folder) / directory, root)
-        for filename in sorted(files):
-            path = Path(folder) / filename
-            if path.suffix.casefold() != '.md' or path.name.startswith('.') or path.name.casefold() == 'memory.md':
+    pending = [(Path(root), '')]
+    while pending:
+        folder, prefix = pending.pop()
+        with os.scandir(folder) as listing:
+            entries = sorted(listing, key=lambda entry: entry.name)
+        for entry in entries:
+            # A real folder, a junction (a folder with a reparse point) or a symlink to a folder.
+            if entry.is_dir(follow_symlinks=False) or (entry.is_symlink() and entry.is_dir()):
+                if entry.name == 'archive' or entry.name.startswith('.'):
+                    continue
+                if _redirected(entry):
+                    raise ValueError('Redirected memory path is not supported: ' + entry.path)
+                pending.append((Path(entry.path), prefix + entry.name + '/'))
                 continue
-            rel = path.relative_to(root).as_posix()
-            note_path(root, rel)
-            if path.stat().st_size > storelib.doctor.NOTE_READ_CAP:
-                raise ValueError('Note exceeds reading limit: ' + str(path))
-            result[rel] = path.read_text(encoding='utf-8-sig')
+            name = entry.name
+            if not name.casefold().endswith('.md') or name.startswith('.') or name.casefold() == 'memory.md':
+                continue
+            if _redirected(entry):
+                raise ValueError('Redirected memory path is not supported: ' + entry.path)
+            rel = prefix + name
+            note_name(rel)
+            if entry.stat(follow_symlinks=False).st_size > storelib.doctor.NOTE_READ_CAP:
+                raise ValueError('Note exceeds reading limit: ' + entry.path)
+            with open(entry.path, encoding='utf-8-sig') as stream:
+                result[rel] = stream.read()
+    result = dict(sorted(result.items()))
     if sum(len(t.encode('utf-8')) for t in result.values()) > MAX_BYTES:
         raise ValueError('Active notes exceed transaction limit; curate before writing')
     return result
@@ -202,7 +229,7 @@ def journal_error(path, reason):
                       'are and the raw ledger is not affected. Manual review required.')
 
 
-def recover(root, _prepared=None):
+def recover(root, _prepared=None, _changed=None):
     journal = storelib.safe(root / '.transaction.json', root)
     if not journal.exists():
         return
@@ -216,13 +243,16 @@ def recover(root, _prepared=None):
         raise journal_error(journal, 'Invalid transaction journal')
     if not isinstance(tx['notes'], dict) or not isinstance(tx['before'], dict) or not isinstance(tx['remove'], list):
         raise ValueError('Invalid transaction payload')
-    check_write_paths(root, [*tx['notes'], *tx['before'], *tx['remove']])
+    fresh = _prepared is not None and tx == _prepared and _changed is not None
+    # A journal found on disk is checked in full; one this process just prepared from a verified
+    # listing needs only the paths it changes (#75).
+    check_write_paths(root, sorted(_changed) if fresh else [*tx['notes'], *tx['before'], *tx['remove']])
     for name, content in list(tx['notes'].items()) + list(tx['before'].items()):
-        note_path(root, name)
+        note_name(name)
         if not isinstance(content, str):
             raise ValueError('Invalid note content')
     for name in tx['remove']:
-        note_path(root, name)
+        note_name(name)
         if name in tx['notes']:
             raise ValueError('Cannot remove a retained note')
     expected_index = index_for(tx['notes'], bool(tx['before']) or (root / 'archive/MEMORY.md').exists())
@@ -240,6 +270,8 @@ def recover(root, _prepared=None):
         links = sorted(p.relative_to(manifest.parent).as_posix() for p in manifest.parent.rglob('*.md') if p != manifest)
         storelib.atomic_write(manifest, '# 歷史資料，不作現行要求\n\n' + ''.join('- [' + p + '](' + p + ')\n' for p in links))
     for name, content in tx['notes'].items():
+        if fresh and name not in _changed:
+            continue  # Unchanged and just read back from disk.
         target = note_path(root, name)
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists() or target.read_text(encoding='utf-8-sig') != content:
@@ -312,6 +344,25 @@ def opened(config, project=None):
             recover(root)
             repair(root, missing)
         yield cfg, project, roots
+
+
+def journal_pending(cfg, lock_root, roots):
+    """A save or rebuild is in progress or was interrupted."""
+    if cfg['mode'] == 'global' and (Path(lock_root) / '.rebuild-transaction.json').exists():
+        return True
+    return any((Path(root) / name).exists() for root in roots.values()
+               for name in ('.transaction.json', '.pending.json'))
+
+
+def needs_repair(cfg, lock_root, roots):
+    """What opened() would have to write before the store can be read: cheap checks, no lock (#75)."""
+    if journal_pending(cfg, lock_root, roots):
+        return True
+    for root in roots.values():
+        index = Path(root) / 'MEMORY.md'
+        if not index.is_file() or index.stat().st_size > storelib.doctor.INDEX_READ_CAP:
+            return True
+    return False
 
 
 def quarantine_oversized(root):
@@ -422,10 +473,9 @@ def receipt_path(root, relative):
     return storelib.safe(root / part, root)
 
 
-def issue_receipt(root, paths, operation, _validated=None):
+def issue_receipt(root, paths, operation, _validated=None, _read=None):
     """Issue evidence only after reading the committed files back under the store lock."""
-    data = notes(root)
-    index = read_index(root)
+    data, index = _read if _read is not None else (notes(root), read_index(root))
     if _validated != (data, index):
         validate(data, index)
     files = {}
@@ -482,17 +532,17 @@ def verify(root, names):
             'contents': {name: path.read_text(encoding='utf-8-sig') for name, path in zip(names, paths)}, **evidence}
 
 
-def prepare_apply(root, plan, scope, sources=None):
+def prepare_apply(root, plan, scope, sources=None, _current=None):
     if not isinstance(plan, dict) or set(plan) != {'expected_revision', 'updates', 'retire'}:
         raise ValueError('Plan needs expected_revision, updates (path: content), retire (paths)')
-    old = notes(root)
-    old_index = read_index(root)
+    # `_current`: the caller read the store under this same lock moments ago (#75).
+    old, old_index = _current if _current is not None else (notes(root), read_index(root))
     if plan['expected_revision'] != revision_for(old, old_index):
         raise ValueError('Revision conflict: refresh context and rebase all related corrections')
     final = dict(old)
     if not isinstance(plan['updates'], dict) or not isinstance(plan['retire'], list):
         raise ValueError('Invalid updates/retire plan')
-    check_write_paths(root, [*old, *plan['updates'], *plan['retire']])
+    check_write_paths(root, [*plan['updates'], *plan['retire']])
     for name in plan['retire']:
         note_path(root, name)
         if name not in old or name in plan['updates']:
@@ -539,13 +589,14 @@ def prepare_apply(root, plan, scope, sources=None):
     return tx, checks, facts, changed, index_changed
 
 
-def apply(root, plan, scope='project', sources=None):
-    tx, checks, facts, changed, index_changed = prepare_apply(root, plan, scope, sources)
+def apply(root, plan, scope='project', sources=None, _current=None):
+    tx, checks, facts, changed, index_changed = prepare_apply(root, plan, scope, sources, _current)
     final, index = tx['notes'], tx['index']
     if changed or index_changed:
         storelib.atomic_write(root / '.transaction.json', json.dumps(tx, ensure_ascii=False))
-        recover(root, _prepared=tx)
-    if notes(root) != final or read_index(root) != index:
+        recover(root, _prepared=tx, _changed=set(changed))
+    committed = (notes(root), read_index(root))  # Read back once; the receipt reuses it (#75).
+    if committed != (final, index):
         raise ValueError('Committed memory does not match the plan; do not claim success')
     result = {'changed': bool(changed or index_changed),
             'paths': [str(root / n) if n in final else str(root / 'archive' / tx['id'] / n) for n in changed],
@@ -555,7 +606,7 @@ def apply(root, plan, scope='project', sources=None):
     proof_paths = result['paths'] + [str(root / n) for n in plan['updates'] if n not in changed]
     if not proof_paths:
         proof_paths = [str(root / 'MEMORY.md')]
-    result.update(issue_receipt(root, proof_paths, 'apply', _validated=(final, index)))
+    result.update(issue_receipt(root, proof_paths, 'apply', _validated=(final, index), _read=committed))
     return result
 
 
@@ -621,7 +672,7 @@ def remember(root, subject, key, value, why, scope='project', kind=None, roots=N
     index = read_index(root)
     plan = {'expected_revision': revision_for(data, index), 'updates': {name: content},
             'retire': sorted(set(retype) - {name})}
-    result = apply(root, plan, scope, roots)
+    result = apply(root, plan, scope, roots, _current=(data, index))
     result['saved_fact'] = {'subject': subject, 'predicate': key, 'value': value, 'type': kind}
     return result
 
