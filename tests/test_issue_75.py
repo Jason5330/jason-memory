@@ -244,7 +244,7 @@ class LedgerLockTests(unittest.TestCase):
         from threading import Event, Thread
         from unittest import mock
         with tempfile.TemporaryDirectory() as tmp:
-            index = Path(tmp) / 'MEMORY.md'
+            index = Path(tmp).resolve() / 'MEMORY.md'
             index.write_text('old', encoding='utf-8')
             ready, close = Event(), Event()
 
