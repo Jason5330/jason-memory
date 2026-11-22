@@ -156,6 +156,16 @@ def _candidates(name):
     if appdata:
         found.append(Path(appdata) / 'npm' / (name + '.cmd'))
     found.append(home / '.npm-global/bin' / name)
+    if name == 'codex' and os.name == 'nt':
+        local = Path(os.environ.get('LOCALAPPDATA') or home / 'AppData/Local')
+        builds = []
+        if local.is_absolute():
+            for path in (local / 'OpenAI/Codex/bin').glob('*/codex.exe'):
+                try:
+                    builds.append((path.stat().st_mtime_ns, path))
+                except FileNotFoundError:
+                    continue  # The desktop updater removed this build.
+        found.extend(path for _, path in sorted(builds, reverse=True))
     return [p for p in found if p.is_file()]
 
 
