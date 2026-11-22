@@ -209,12 +209,10 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
         records = [r for r in existing if start <= r['seq'] <= upto and r.get('kind') in REPLAYED_KINDS]
         store = ledger.store_id(cfg, root)
     target = Path(target or config)
-    with runtime.opened(target, project) as (tcfg, _, troots):
-        index_text = '\n\n'.join(scope + ':\n' + runtime.read_index(r) for scope, r in troots.items())
-        prefix = runtime_prefix(target, project, tcfg)
-        home = runtime.configuration(target, project)[2]
     if not records:
         return 0
+    tcfg, _, home, _ = runtime.configuration(target, project)
+    prefix = runtime_prefix(target, project, tcfg)
     command = agent_command(opts, home) if runner is None else ['injected-runner']
     if command is None:
         print(NO_AGENT, file=sys.stderr)
@@ -224,6 +222,9 @@ def consolidate(config, project, start, upto, opts, runner=None, target=None):
     run = runner or (lambda cmd, text: _run_agent(cmd, text, env, project, timeout))
     owner = os.environ.get('JASON_DREAM_OWNER') if target == Path(config) else None
     for lines, last in chunks(records, store):
+        # A previous chunk may have saved or retired notes in this target (including rebuild staging).
+        with runtime.opened(target, project) as (_, _, roots):
+            index_text = '\n\n'.join(scope + ':\n' + runtime.read_index(root) for scope, root in roots.items())
         try:
             code = run(command, build_prompt(lines, index_text, prefix, tcfg.get('mode') == 'global'))
         except subprocess.TimeoutExpired:
