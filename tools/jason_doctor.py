@@ -242,11 +242,17 @@ def _read_bytes(p, cap=None):
     # instead of crashing with a traceback. With `cap`, returns the sentinel
     # _TOO_LARGE instead of reading a file past that size.
     try:
-        if cap is not None and os.path.getsize(p) > cap:
+        size = os.path.getsize(p) if cap is not None else None
+        if size is not None and size > cap:
             return _TOO_LARGE
         with open(p, "rb") as fh:
-            raw = fh.read(cap + 1) if cap is not None else fh.read()
-            return _TOO_LARGE if cap is not None and len(raw) > cap else raw
+            if size is None:
+                return fh.read()
+            # Most notes are small. Request their observed size plus one byte to detect growth.
+            raw = fh.read(size + 1)
+            if size < len(raw) <= cap:
+                raw += fh.read(cap + 1 - len(raw))
+            return _TOO_LARGE if len(raw) > cap else raw
     except OSError:
         return None
     except (MemoryError, OverflowError):
