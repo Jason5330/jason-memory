@@ -149,8 +149,9 @@ class ForegroundNeverWaitsTests(unittest.TestCase):
             self.assertNotIn('STORE CHECK', context)
             self.assertNotIn('MEMORY UNAVAILABLE', context)
             seen += 1
-        saver.wait(timeout=60)
-        self.assertGreater(int(saver.stdout.read().strip() or 0), 2, 'the saver never saved')
+        stdout, stderr = saver.communicate(timeout=60)
+        self.assertEqual(saver.returncode, 0, stderr)
+        self.assertGreater(int(stdout.strip() or 0), 2, 'the saver never saved')
         self.assertGreater(seen, 2)
 
     def test_a_store_that_needs_repair_is_still_repaired(self):
@@ -238,6 +239,40 @@ class UnsettledReadTests(unittest.TestCase):
 
 
 class LedgerLockTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows file sharing semantics')
+    def test_atomic_write_finishes_after_index_reader_closes(self):
+        from threading import Event, Thread
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            index = Path(tmp) / 'MEMORY.md'
+            index.write_text('old', encoding='utf-8')
+            ready, close = Event(), Event()
+
+            def read():
+                with index.open('rb'):
+                    ready.set()
+                    close.wait(timeout=5)
+
+            replace = os.replace
+            def replace_while_reading(src, dst):
+                try:
+                    return replace(src, dst)
+                except PermissionError:
+                    close.set()
+                    raise
+
+            thread = Thread(target=read)
+            thread.start()
+            try:
+                self.assertTrue(ready.wait(timeout=5))
+                with mock.patch.object(os, 'replace', replace_while_reading):
+                    runtime.storelib.atomic_write(index, 'new')
+                self.assertTrue(close.is_set())
+                self.assertEqual(index.read_text(encoding='utf-8'), 'new')
+            finally:
+                close.set()
+                thread.join()
+
     def test_ledger_lock_is_reentrant_and_separate_from_the_store_lock(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve() / 'store'

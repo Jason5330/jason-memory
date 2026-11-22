@@ -68,6 +68,21 @@ def locked(home, timeout=10):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
+def retry_windows_reader(operation, *args):
+    """Windows readers can briefly deny replacement or removal of an open file."""
+    delay = 0.01
+    deadline = time.monotonic() + 0.5
+    while True:
+        try:
+            return operation(*args)
+        except PermissionError as exc:
+            remaining = deadline - time.monotonic()
+            if os.name != 'nt' or getattr(exc, 'winerror', None) not in (5, 32, 33) or remaining <= 0:
+                raise
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, 0.1)
+
+
 def atomic_write(path, text):
     safe(path, path.parent)
     fd, temp = tempfile.mkstemp(prefix='.write-', dir=str(path.parent))
@@ -76,7 +91,7 @@ def atomic_write(path, text):
             stream.write(text)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temp, path)
+        retry_windows_reader(os.replace, temp, path)
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
@@ -155,11 +170,11 @@ def recover(store):
                 manifest += '- [' + archived.stem + '](' + archived.name + ')\n'
         atomic_write(archive_dir / 'MEMORY.md',manifest)
         if path.exists():
-            path.unlink()
+            retry_windows_reader(path.unlink)
     else:
         atomic_write(path,pending['content'])
     atomic_write(store / 'MEMORY.md',pending['index'])
-    journal.unlink()
+    retry_windows_reader(journal.unlink)
 
 
 def stores(home, project):
