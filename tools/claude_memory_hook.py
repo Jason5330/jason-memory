@@ -93,6 +93,10 @@ def render(snapshot, config, project, limit=LIMIT, background=False):
             # Index/file problems are not value conflicts (#78): the notes may still be correct.
             lines.append('STORE CHECK (structure, not a value conflict; notes may be unlisted in the index): '
                          + structure[:600] + '\n')
+        if info['audit'].get('read_during_save'):
+            lines.append('READ DURING A SAVE (#100): the index and notes may come from different saves, so a '
+                         'just-saved note may be missing or a just-retired one still listed. The next prompt '
+                         'refreshes; if a rule matters now, read it with read --scope ' + scope + ' --note NAME.\n')
         duplicates = info['audit'].get('duplicates') or []
         if duplicates:
             lines.append('DUPLICATE FACTS (same value in several notes; a correction must update all of them in one '
@@ -364,9 +368,10 @@ def consistent_snapshot(config, cwd, roots, attempts=5):
     """Read the store without the writer lock (#75). A save replaces each file atomically and keeps its
     journal until it ends, so a read that starts and ends with no journal and an unchanged fingerprint saw
     one consistent state. Otherwise retry, then read under the lock for a few seconds at most; if saves
-    keep the lock busy, use the last read (committed notes, structural verdict dropped) instead of none."""
+    keep the lock busy, fall back to a read whose own index/notes check passed; only if none did, use a torn
+    read marked `read_during_save` so the turn is told, never passed off as consistent (#100)."""
     cfg, _, lock_root, _ = runtime.configuration(config, cwd)
-    last = None
+    settled = torn = None
     for _ in range(attempts):
         before = store_fingerprint(roots)
         if not runtime.journal_pending(cfg, lock_root, roots):
@@ -379,12 +384,13 @@ def consistent_snapshot(config, cwd, roots, attempts=5):
                 break  # Something to repair (an oversized note, say): the locked path fixes it.
             if not runtime.journal_pending(cfg, lock_root, roots) and store_fingerprint(roots) == before:
                 return snapshot, before
-            # A save finished during this read: every note read is a committed version, but the
-            # structural check (doctor) may have seen it half done - an "unfinished journal", an
-            # orphan, an index row ahead of its note. Keep the notes, drop that verdict (#75).
-            for info in snapshot.values():
-                info['audit']['structural_errors'] = ''
-            last = (snapshot, before)  # `before`: the next prompt sees the change and refreshes.
+            # A save finished during this read: every note read is a committed version. If the read's own
+            # index/notes check passed, it is a usable (perhaps slightly old) state; otherwise the index and
+            # notes may come from different saves (#100). `before`: the next prompt sees the change and refreshes.
+            if any(info['audit'].get('structural_errors') for info in snapshot.values()):
+                torn = (snapshot, before)
+            else:
+                settled = (snapshot, before)  # The newest read that passed its own check.
         time.sleep(0.1)
     try:
         with runtime.opened(config, cwd, lock_timeout=3) as (_, _, locked_roots):
@@ -392,14 +398,19 @@ def consistent_snapshot(config, cwd, roots, attempts=5):
     except ValueError as exc:
         if 'busy' not in str(exc):
             raise
-        if last is None:
+        if settled is not None:
+            return settled
+        if torn is None:
             # Every attempt met a save in progress: read once more as it stands rather than give no memory.
             before = store_fingerprint(roots)
-            snapshot = runtime.context(roots)
-            for info in snapshot.values():
-                info['audit']['structural_errors'] = ''
-            last = (snapshot, before)
-        return last
+            torn = (runtime.context(roots), before)
+        if not any(info['audit'].get('structural_errors') for info in torn[0].values()):
+            return torn  # The last-chance read happened to pass its own check.
+        for info in torn[0].values():
+            # Raced a save: the verdict describes the race, not the store. Say so instead (#100).
+            info['audit']['structural_errors'] = ''
+            info['audit']['read_during_save'] = True
+        return torn
 
 
 def store_fingerprint(roots):

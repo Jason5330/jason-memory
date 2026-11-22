@@ -215,6 +215,58 @@ class UnsettledReadTests(unittest.TestCase):
             self.assertIn('QA_RULE_UNSETTLED', ''.join(info['notes'].values()))
             self.assertEqual(info['audit']['structural_errors'], '')
 
+    def _unsettled(self, verdicts):
+        """Every read races a save (fingerprint always changes) and the lock never frees. `verdicts` is the
+        structural verdict each successive read reports; returns what consistent_snapshot hands the hook."""
+        import itertools
+        from unittest import mock
+        import claude_memory_hook as hook
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        project = Path(tmp.name).resolve()
+        config = project / '.jason-memory.json'
+        config.write_text(json.dumps({'version': 1, 'mode': 'project', 'memory_root': '.jason-memory'}),
+                          encoding='utf-8')
+        with runtime.opened(config) as (_, _, roots):
+            runtime.remember(roots['project'], 'qa', 'rule', 'QA_RULE_100', 'x')
+        real_context = runtime.context
+        reads = iter(verdicts)
+
+        def racing(roots):
+            snapshot = real_context(roots)
+            verdict = next(reads, verdicts[-1])
+            for info in snapshot.values():
+                info['audit']['structural_errors'] = verdict
+                info['qa_read'] = verdict
+            return snapshot
+        changing = itertools.count()
+        with mock.patch.object(hook, 'store_fingerprint', side_effect=lambda roots: next(changing)), \
+                mock.patch.object(runtime, 'context', side_effect=racing), \
+                mock.patch.object(runtime, 'opened', side_effect=ValueError('Memory busy; retry later.')), \
+                mock.patch.object(hook.time, 'sleep'):
+            snapshot, _ = hook.consistent_snapshot(config, project, roots)
+        return hook, config, project, snapshot
+
+    def test_100_a_consistent_read_is_preferred_over_a_later_torn_one(self):
+        torn = 'ISSUE: index out of sync with notes (edited outside the runtime?): qa/rule.md'
+        hook, config, project, snapshot = self._unsettled(['', torn, torn, torn, torn])
+        info = snapshot['project']
+        self.assertEqual(info['qa_read'], '', 'a torn read was used although a consistent one existed')
+        self.assertFalse(info['audit'].get('read_during_save'))
+        text = hook.render(snapshot, config, project)
+        self.assertNotIn('STORE CHECK', text)
+        self.assertNotIn('READ DURING A SAVE', text)
+
+    def test_100_a_torn_read_is_never_passed_off_as_consistent(self):
+        torn = 'ISSUE: index out of sync with notes (edited outside the runtime?): qa/rule.md'
+        hook, config, project, snapshot = self._unsettled([torn])
+        info = snapshot['project']
+        self.assertIn('QA_RULE_100', ''.join(info['notes'].values()))  # Still some memory, not none.
+        self.assertTrue(info['audit'].get('read_during_save'))
+        text = hook.render(snapshot, config, project)
+        self.assertIn('READ DURING A SAVE', text)
+        self.assertNotIn('STORE CHECK', text)  # Not a store defect: a race the next prompt clears.
+
     def test_a_note_retired_mid_read_is_retried_not_fatal(self):
         import itertools
         from unittest import mock
