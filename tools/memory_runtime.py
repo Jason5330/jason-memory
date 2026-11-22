@@ -279,9 +279,9 @@ def recover(root, _prepared=None, _changed=None):
     for name in tx['remove']:
         target = note_path(root, name)
         if target.exists():
-            target.unlink()
+            storelib.retry_windows_reader(target.unlink)
     storelib.atomic_write(root / 'MEMORY.md', tx['index'])
-    journal.unlink()
+    storelib.retry_windows_reader(journal.unlink)
 
 
 def recover_global_rebuild(home, prepared=None):
@@ -309,7 +309,7 @@ def recover_global_rebuild(home, prepared=None):
             raise ValueError('Conflicting transaction during global rebuild recovery')
         storelib.atomic_write(pending, json.dumps(tx, ensure_ascii=False))
         recover(root, _prepared=tx if batch == prepared else None)
-    journal.unlink()
+    storelib.retry_windows_reader(journal.unlink)
 
 
 def commit_global_rebuild(home, roots, plans):
