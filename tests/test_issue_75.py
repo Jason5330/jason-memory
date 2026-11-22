@@ -164,6 +164,28 @@ class ForegroundNeverWaitsTests(unittest.TestCase):
 class UnsettledReadTests(unittest.TestCase):
     """The fast-machine case CI hit: saves finish during every read and the lock is never free."""
 
+    def test_fingerprint_keeps_other_notes_when_one_retires_after_listing(self):
+        from unittest import mock
+        import claude_memory_hook as hook
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            retired = root / 'retired.md'
+            retired.write_text('retire', encoding='utf-8')
+            (root / 'active.md').write_text('keep', encoding='utf-8')
+            walk = os.walk
+
+            def walk_during_retirement(*args, **kwargs):
+                for folder, dirs, files in walk(*args, **kwargs):
+                    self.assertIn(retired.name, files)
+                    retired.unlink()
+                    yield folder, dirs, files
+
+            roots = {'project': root}
+            with mock.patch.object(hook.os, 'walk', walk_during_retirement):
+                fingerprint = hook.store_fingerprint(roots)
+            self.assertEqual(fingerprint, hook.store_fingerprint(roots))
+            self.assertNotEqual(fingerprint, hook.store_fingerprint({}))
+
     def test_recall_still_gets_committed_notes_and_no_false_structural_verdict(self):
         import itertools
         from unittest import mock

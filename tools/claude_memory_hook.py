@@ -410,7 +410,10 @@ def store_fingerprint(roots):
             dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
             for filename in sorted(files):
                 if filename.casefold().endswith('.md'):
-                    info = os.stat(os.path.join(folder, filename))
+                    try:
+                        info = os.stat(os.path.join(folder, filename))
+                    except FileNotFoundError:
+                        continue  # A concurrent save retired this note after the directory listing.
                     rows.append((scope, os.path.relpath(os.path.join(folder, filename), root),
                                  info.st_size, info.st_mtime_ns))
     return hashlib.sha256(json.dumps(rows).encode('utf-8')).hexdigest()
