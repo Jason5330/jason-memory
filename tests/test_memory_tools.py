@@ -297,6 +297,7 @@ class StoreTest(unittest.TestCase):
         path = self.write('growing.md', 'x' * 9)
         with patch.object(doctor.os.path, 'getsize', return_value=0):
             self.assertIs(doctor._read_bytes(path, cap=8), doctor._TOO_LARGE)
+            self.assertEqual(doctor._read_bytes(path, cap=9), b'x' * 9)
 
     def test_unreadable_subtree_is_not_reported_clean(self):
         # Permission bits are unreliable on Windows; reproduce os.walk's error
