@@ -272,7 +272,7 @@ class AgentDiscoveryTests(unittest.TestCase):
             path.write_bytes(b'')
         with mock.patch.object(dream.shutil, 'which', return_value=None), \
                 mock.patch.object(dream.Path, 'home', return_value=self.home), \
-                mock.patch.dict(os.environ, {'APPDATA': str(self.home / 'appdata')}):
+                mock.patch.dict(os.environ, {'APPDATA': str(self.home / 'appdata'), 'LOCALAPPDATA': str(self.home / 'local')}):
             return dream.agent_command({'dream_agent': 'auto'})
 
     def test_vscode_extension_claude_is_used_when_not_on_path(self):
@@ -292,11 +292,24 @@ class AgentDiscoveryTests(unittest.TestCase):
         self.assertIn('nothing is lost', dream.NO_AGENT)
         self.assertIn('ledger.dream_agent', dream.NO_AGENT)
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows desktop installation')
+    def test_codex_desktop_build_is_found_without_path(self):
+        builds = self.home / 'local/OpenAI/Codex/bin'
+        old, latest = builds / 'older/codex.exe', builds / 'newer/codex.exe'
+        for path, stamp in ((old, 10), (latest, 20)):
+            path.parent.mkdir(parents=True)
+            path.touch()
+            os.utime(path, (stamp, stamp))
+        command = self.locate_with()
+        self.assertEqual(Path(command[0]), latest)
+        self.assertIn('exec', command)
+
     def test_global_install_warns_when_no_agent_cli_exists(self):
         profile = self.home / 'profile'
         (profile / '.codex').mkdir(parents=True)
         env = dict(os.environ, PATH=str(Path(sys.executable).parent), HOME=str(self.home / 'nohome'),
-                   USERPROFILE=str(self.home / 'nohome'), APPDATA=str(self.home / 'appdata'), PYTHONUTF8='1')
+                   USERPROFILE=str(self.home / 'nohome'), APPDATA=str(self.home / 'appdata'),
+                   LOCALAPPDATA=str(self.home / 'local'), PYTHONUTF8='1')
         result = subprocess.run([sys.executable, str(ROOT / 'global/install.py'), '--user-home', str(profile),
                                  '--home', str(self.home / 'mem'), '--dry-run'], capture_output=True, text=True,
                                 encoding='utf-8', env=env, timeout=120)
