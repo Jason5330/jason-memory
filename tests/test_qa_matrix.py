@@ -131,6 +131,9 @@ class GlobalQAMatrix(unittest.TestCase):
             'store non-hex': 'zz' * 8 + ':' + seq + ':' + digest,
             'store local': 'local:' + seq + ':' + digest,
         }
+        # A random hash or store id with no a-f letters is unchanged by .upper(): that "variant" is the valid
+        # reference itself and rightly saves (ref-20261122 CI, ~0.4% of runs). Only test real variants.
+        bad = {name: ref for name, ref in bad.items() if ref != good}
         contexts = {'plain': '來源：ledger {}', 'english': 'Source: ledger {}', 'inline code': '來源：ledger `{}`',
                     'full stop': '來源：ledger {}。', 'parenthesis': '（來源：ledger {}）', 'no ledger word': '來源：{}',
                     # Markdown and quoting around the reference (#55): valid must pass, invalid must fail.
